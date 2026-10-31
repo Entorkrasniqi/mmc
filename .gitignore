@@ -12,6 +12,8 @@ demo_out/
 *.bin
 # Maven / Yamcs runtime output (database, logs)
 yamcs/target/
+# local secrets: copy .env.example to .env and change the passwords (protocols/security-and-threat-model.md)
+.env
 # editors / OS
 .idea/
 .vscode/

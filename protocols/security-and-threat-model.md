@@ -28,16 +28,16 @@ Everything crossing a boundary is untrusted until validated: browser input, mode
 | 1 | Anyone who can reach the TC UDP port can command the spacecraft | link | bind to `127.0.0.1`; in Compose, an internal network only; roadmap M5 (CRC) and M10 (message authentication) | Documented limit in README; not fixed |
 | 2 | Forged or garbled telemetry accepted | ingestion | strict decode (length, APID, type checks, already in `codec.py`); count rejects; sequence-gap detection (M3) | Partly enforced |
 | 3 | Unauthorised user runs an action | API | authenticate every request; role check in the runner; negative tests | Not yet |
-| 4 | Write path that bypasses the runner | database | separate DB roles, no write grants for the reader role | Not yet |
-| 5 | Audit trail altered | database | append-only grants; optional hash chain | Not yet |
+| 4 | Write path that bypasses the runner | database | separate DB roles; the reader and ingest roles cannot write operations tables; exact privilege matrix test | Enforced in the database (`tests/db/test_privileges.py`) |
+| 5 | Audit trail altered | database | no UPDATE/DELETE grants, plus a trigger that also refuses the owner and superusers; optional hash chain later | Enforced (trigger and grants); hash chain not done |
 | 6 | Prompt injection through notes, labels, imported data | agent | data/instruction separation; propose-only; evals ([agent-safety-and-autonomy.md](agent-safety-and-autonomy.md)) | Not yet |
 | 7 | Agent exceeds its role (excessive agency) | agent | role has no approve/release; tools from registry only; kill switch | Not yet |
 | 8 | Model output rendered unsafely (XSS) | dashboard | treat agent text as plain text; React escapes by default; never `dangerouslySetInnerHTML` with model or user text | Not yet |
 | 9 | Sensitive data sent to a model provider | agent | send only the object fields a tool returns; no secrets in tool results; review provider data terms | Not yet |
 | 10 | SQL injection | API, DB | parameterised queries through the ORM/driver only; no string-built SQL | Not yet |
 | 11 | Vulnerable or malicious dependency | build | pin versions, lockfiles, `pip-audit` and `npm audit` in CI, Dependabot, licence check | Not yet |
-| 12 | Secrets in git | repo | `.env` ignored, secret scanning in CI, rotate if ever committed | Not yet |
-| 13 | Container escape or over-privileged container | Docker | non-root user, read-only filesystem where possible, no published DB port, pinned base image digests | Not yet |
+| 12 | Secrets in git | repo | `.env` ignored (done), `.env.example` holds placeholders only, secret scanning in CI, rotate if ever committed | Partly |
+| 13 | Container escape or over-privileged container | Docker | non-root user, read-only filesystem where possible, pinned base image digests; the dev database port is published on `127.0.0.1` only (never on the network) and the hardened configuration will not publish it at all | Partly (localhost-only port; the rest not yet) |
 | 14 | Denial of service (flood of UDP or API calls) | link, API | rate limits, bounded queues, drop-and-count under load | Not yet |
 | 15 | Yamcs web UI has no login | Yamcs config | bound to `127.0.0.1`; do not expose (README) | Documented limit |
 | 16 | Clock confusion causes wrong ordering or false "stale" | time | the three-clock rule in [action-runner-and-audit.md](action-runner-and-audit.md) | Not yet |

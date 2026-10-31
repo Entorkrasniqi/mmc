@@ -66,14 +66,14 @@ Two layers, deliberately separate:
 ### Alarm
 - Represents: one episode of a parameter being outside its limits (an *event*, with a start and an end).
 - Primary key: `alarmId`
-- Properties: severity (enum: WARNING | CRITICAL), triggerValue, limitViolated, raisedAt, clearedAt, state (enum: ACTIVE | ACKNOWLEDGED | CLEARED), acknowledgedAt, acknowledgeNote
+- Properties: severity (enum: WARNING | CRITICAL), triggerValue, limitViolated, raisedAt, clearedAt, state (enum: ACTIVE | ACKNOWLEDGED | CLEARED), acknowledgedAt, acknowledgeNote. At most one open (not CLEARED) alarm per spacecraft and parameter: an alarm is an episode and may escalate from WARNING to CRITICAL (enforced by the database).
 - Source: raised by the automation in §5 (or by Yamcs, mapped in)
 - Readable by: all roles
 
 ### Anomaly
 - Represents: an unexpected spacecraft behaviour an operator has decided deserves tracking (e.g. unplanned SAFE mode).
 - Primary key: `anomalyId`
-- Properties: title, status (enum: OPEN | INVESTIGATING | RESOLVED), severity, detectedAt, resolvedAt, rootCause, resolutionNote
+- Properties: title, status (enum: OPEN | INVESTIGATING | RESOLVED), severity (enum: LOW | MEDIUM | HIGH), detectedAt, resolvedAt, rootCause, resolutionNote, openedBy. Resolving needs a root cause (enforced by the database).
 - Source: opened by people or by an automation; **never deleted, resolved**
 - Readable by: all roles
 
@@ -101,7 +101,7 @@ Two layers, deliberately separate:
 ### Operator
 - Represents: a person or agent that acts in the system.
 - Primary key: `operatorId`
-- Properties: displayName, kind (enum: HUMAN | AGENT | SYSTEM), role
+- Properties: displayName, kind (enum: HUMAN | AGENT | SYSTEM), role (enum: VIEWER | OPERATOR | SUPERVISOR | AGENT | SYSTEM; the database only allows matching pairs: a HUMAN is a viewer, operator or supervisor, an AGENT has role AGENT, a SYSTEM has role SYSTEM)
 - Source: created by administrators
 - Readable by: all roles (display name only for non-supervisors)
 
@@ -213,8 +213,9 @@ Adding a parameter, changing an alarm limit or adding a command is **a pull requ
 - **Operator**: Propose, Approve (NORMAL only), Release, Cancel, Acknowledge Alarm, Open/Update Anomaly.
 - **Supervisor**: everything an Operator can, plus Approve VITAL commands, override no-contact, Plan Contact, resolve anomalies.
 - **Agent**: read everything, Propose Command, Open Anomaly, add anomaly notes. Cannot approve, release or acknowledge.
+- **System** (a kind of operator for ingestion and automations, not a person): runs only the actions the automations in §5 need (create and clear Alarms, record SpacecraftEvents, move CommandExecutions from SENT to their outcome, open Anomalies). Never approves or acknowledges.
 - **Spec Maintainer**: not a runtime role; changes the YAML through code review.
-- The application database role has **no direct write access** to operations tables; only the action runner writes. Telemetry ingestion has its own narrow write role (append to the samples table only).
+- The application database role has **no direct write access** to operations tables; only the action runner writes. Telemetry ingestion has its own narrow write role (append to the samples table and refresh the spacecraft's newest values, nothing else). Operators, spacecraft and ground stations are reference data created by administrators, not by actions. Phase 1 implements this with four database roles (`migrator`, `app_runner`, `app_reader`, `ingest`); see `migrations/versions/0001_operations_schema.py` and `tests/db/test_privileges.py`.
 
 ## 8. Agent tool surface
 - **Read tools:** `get_spacecraft_state`, `get_series(parameter, from, to)`, `list_alarms(state)`, `list_command_executions(status)`, `get_command_definition`, `list_contacts`.

@@ -24,3 +24,31 @@ jobs:
         run: XTCE_ONLINE=1 pytest -q
       - name: Offline demo scenario
         run: minisat demo --hours 3 --out demo_out
+
+  database:
+    # the operations layer on a real PostgreSQL (migrations, roles, privileges, constraints); no mocks
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          # throw-away password of a service container that only lives for this job; not a real secret
+          POSTGRES_PASSWORD: ci-only-admin-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MINISAT_TEST_ADMIN_URL: postgresql://postgres:ci-only-admin-password@localhost:5432/postgres
+      MINISAT_REQUIRE_DB: "1"          # fail, never skip, if the database is not reachable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the package with the database dependencies
+        run: pip install -e ".[dev,db]"
+      - name: Database tests and ontology definitions
+        run: pytest -q tests/db tests/test_ontology_definitions.py tests/test_ontology_dbconfig.py
+      - name: The Docker Compose file is valid
+        run: docker compose --env-file .env.example config --quiet

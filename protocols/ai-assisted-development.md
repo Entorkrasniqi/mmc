@@ -64,7 +64,7 @@ Keep the entry-point instructions (`CLAUDE.md` or similar) short and link to the
 | --- | --- | --- |
 | Generated XTCE is current | `minisat gen-xtce --check` in CI and tests | Enforced (existing) |
 | Tests and lint pass | CI | Enforced (existing) |
-| No direct writes to operations tables | database grants + test | Not yet |
+| No direct writes to operations tables | database grants; exact privilege matrix in `tests/db/test_privileges.py` | Enforced at the database (the runner module boundary is not built yet) |
 | Licence check on dependencies | CI job | Not yet |
-| Secrets not committed | secret scanning in CI | Not yet |
+| Secrets not committed | `.env` is git-ignored (`.env.example` has placeholders); secret scanning in CI | Partly (ignore rule only) |
 | Review before merge | branch protection | Not yet |

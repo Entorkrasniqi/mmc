@@ -94,6 +94,7 @@ The application connects as `app_reader` by default and uses `app_runner` inside
 
 | Rule | Mechanism | State |
 | --- | --- | --- |
-| Single write path | module boundary + test | Not yet |
-| Append-only audit | DB grants + test | Not yet |
-| Role separation | DB roles in the Compose/init SQL | Not yet |
+| Single write path | database: only `app_runner` can write (`tests/db/test_privileges.py`); Python module boundary and test | Database part enforced; runner not built yet |
+| Append-only audit | no UPDATE/DELETE grants **and** a trigger that also stops the owner and superusers; tests as every role | Enforced |
+| Role separation | `db/roles.sql`, `db/database.sql` (used by Docker and the tests); exact privilege matrix test | Enforced |
+| Idempotency keys, lifecycle consistency, two-person rule, human-only approval | constraints and indexes in `migrations/versions/0001_operations_schema.py`; `tests/db/test_constraints.py` | Enforced in the database; the runner must still enforce them with good error messages |

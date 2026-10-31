@@ -26,6 +26,13 @@ SAFE mode (5.4 h). At 6.5 h the operator tries PAYLOAD again and the satellite *
 operator returns to NOMINAL and the battery recovers. Grey bands are eclipses (the satellite is in the Earth's shadow, solar panels
 produce nothing).*
 
+> **Where the project is going.** The simulator, packet codec and XTCE generator described below are the foundation. On top of them
+> the project is being extended into an ontology-based mission-control application: a PostgreSQL store with an audit trail, an action
+> runner, a web dashboard and an AI assistant that may propose commands but never send them. The design is in
+> [`ontology.md`](ontology.md), the plan and what is done in [`PLAN.md`](PLAN.md), and the engineering rules in
+> [`protocols/`](protocols/README.md). So far only the database layer exists (section 3.5); everything else in this README
+> describes the simulator side.
+
 ---
 
 ## Table of contents
@@ -254,7 +261,7 @@ cd mini-mission-control
 python3 -m venv .venv && source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"                                    # the package + pytest, lxml, matplotlib
 minisat info                                               # the telemetry/telecommand interface, from the specification
-pytest -q                                                  # 197 tests, about 10 seconds
+pytest -q                                                  # 221 tests in about 20 seconds; 86 database tests skip themselves (section 3.5)
 ```
 
 Run the commands from the repository root: the default specification path is `spec/minisat.yaml`. (Use `minisat --spec other.yaml <command>`
@@ -379,6 +386,35 @@ Then open **http://localhost:8090**, choose the instance **minisat**, and look a
 | A command is "sent" but nothing happens | Look at the simulator's log line: it prints `ACCEPT` or `REJECT` with a reason for every command it receives. |
 
 To stop everything: Ctrl-C in each terminal. Yamcs's data (archive) lives in `yamcs/target/yamcs/yamcs-data`, which `mvn clean` removes.
+
+### 3.5 The database (operations layer)
+
+The first piece of the ontology layer ([`ontology.md`](ontology.md), [`PLAN.md`](PLAN.md) phase 1) is a PostgreSQL schema for what operators *do*:
+command executions, alarms, anomalies, contact windows, an audit log, an outbox, plus a time series of telemetry samples. The *definitions* (parameters,
+packet types, commands) are not stored there: they come from `spec/minisat.yaml` and are loaded read-only by `minisat.ontology.definitions`.
+
+```bash
+pip install -e ".[dev,db]"
+cp .env.example .env                       # then change every password in it
+docker compose up -d db                    # PostgreSQL 16; creates four roles, locked down (db/roles.sql, db/database.sql)
+set -a; . ./.env; set +a
+alembic upgrade head                       # applies migrations/ as the "migrator" role
+```
+
+Four roles with different rights: `migrator` owns the schema, `app_runner` is the only role that writes the operations tables (and never deletes),
+`app_reader` can only read, `ingest` can only append samples and refresh a spacecraft's newest values. Nobody can change the audit log (a trigger refuses it,
+even for the owner). Several rules of the ontology are also enforced by the database itself: a vital command is not approved by whoever proposed it,
+only a person (not an agent) approves a command or acknowledges an alarm, a command cannot go beyond PROPOSED without an approver, one open alarm per parameter,
+no overlapping contacts on one station.
+
+The database tests run against a real server, with no mocks:
+
+```bash
+MINISAT_TEST_ADMIN_URL=postgresql://postgres:PASSWORD@localhost:5432/postgres pytest -q tests/db
+```
+
+They need a superuser URL and the `psql` program; each run creates and drops scratch databases. Without the variable they skip. Set `MINISAT_REQUIRE_DB=1` to make
+a missing server a failure instead (the CI job does).
 
 ---
 
@@ -626,7 +662,8 @@ A generated file that nobody has loaded into the real program is the kind of thi
    restriction criteria, decodes bit fields, applies alarm ranges, resolves meta-command inheritance and argument assignments, and builds command bytes. The tests require that for every packet and command the interpreter and the Python codec agree. If they do, the XML describes the real wire format.
 5. **The official schema.** The generated file is validated against the XTCE 1.2 XSD that Yamcs ships (`tools/validate_xtce.py`, using `lxml`). It also fails correctly on a deliberately damaged file.
 6. **Mutation checks** (`python tools/mutation_check.py`, about 80 seconds; not part of the normal suite): the script injects 14 deliberate bugs into copies of the code (wrong byte order for the time field or for floats, an off-by-one in the length field written into the XTCE, a wrong sequence-flag value, a shifted
-   sequence-count field, swapped warning/critical limits in the XTCE, wrong restriction values for the APID or the secondary-header flag, a command id off by one, inverted eclipse logic, a disabled on-board protection, a disabled range check, and two spec changes without regenerating the database). **Every one is caught by at least one test**; run the script yourself to see which test notices which bug.
+   sequence-count field, swapped warning/critical limits in the XTCE, wrong restriction values for the APID or the secondary-header flag, a command id off by one, inverted eclipse logic, a disabled on-board protection, a disabled range check, and two spec changes without regenerating the database). **Every one is caught by at least one test**; run the script yourself to see which test notices which bug. With `MINISAT_TEST_ADMIN_URL` set (section 3.5) it
+   also injects 14 database bugs (an extra grant, a removed constraint, a disabled audit trigger, a lifted two-person rule ...); all 28 were caught on the last run.
 7. **Platforms.** The 197 tests passed on Python 3.11, 3.12 and 3.13, and a clean `pip install` into a fresh virtual environment gave a working `minisat` command. Python 3.10 (the minimum declared) has not been run locally; it is in the CI matrix.
 
 **What this does not prove.** None of it proves that *Yamcs* accepts the configuration and interprets the database as intended: that needs a run (section 3.4). The interpreter encodes my understanding of XTCE and of Yamcs's behaviour,
@@ -654,14 +691,20 @@ The packet and database side works for any specification.
 mini-mission-control/
 ├── spec/minisat.yaml                 the interface specification (the single source of truth)
 ├── src/minisat/                      the Python package: spec, ccsds, codec, xtce, model, simulator, demo, cli
+│   └── ontology/                     definitions.py (read-only, from the spec), dbconfig.py (database roles and URLs)
+├── db/                               roles.sql, database.sql and init/ : the database roles and lock-down (used by Docker and the tests)
+├── migrations/                       Alembic migrations of the operations schema (run as the migrator role)
+├── docker-compose.yml, .env.example  the PostgreSQL service and its settings (copy to .env)
+├── ontology.md, PLAN.md              the domain model and the plan (what is done, what is next)
+├── protocols/                        engineering protocols and architecture decision records (adr/)
 ├── yamcs/
 │   ├── pom.xml                       Maven project (Yamcs 5.13.7, no Java code of our own)
 │   └── src/main/yamcs/
 │       ├── etc/                      yamcs.yaml, yamcs.minisat.yaml, processor.yaml
 │       └── mdb/minisat.xml           the GENERATED XTCE database (do not edit by hand)
-├── tests/                            197 tests (table below) + xtce_interp.py, the independent XTCE reader
+├── tests/                            221 tests + 86 database tests (table below), xtce_interp.py (the independent XTCE reader)
 ├── tools/validate_xtce.py            checks an XTCE file against the official XSD
-├── tools/mutation_check.py           injects 14 known bugs and checks that the tests notice every one
+├── tools/mutation_check.py           injects 14 known bugs (plus 14 database bugs with a server) and checks that the tests notice every one
 ├── docs/                             scenario.png and docs/example/ (scenario.csv, demo_console.txt)
 ├── .github/workflows/ci.yml          GitHub Actions: Python 3.10-3.13, database up to date, tests, schema check, demo
 ├── LICENSE                           AGPL-3.0
@@ -680,6 +723,9 @@ mini-mission-control/
 | `test_cli.py` | 24 | every sub-command, exit codes and error messages, a recorded session decoded again |
 | `test_demo.py` | 4 | the scenario's story, reproducibility, CSV and plot |
 | `test_yamcs_config.py` | 7 | ports, time offset and unit agree with the codec, built-in classes only, files exist |
+| `test_ontology_definitions.py` | 16 | definitions agree with the YAML read independently, hand-counted packet sizes, alarm severity boundaries, read-only |
+| `test_ontology_dbconfig.py` | 9 | database URLs per role, missing or odd settings |
+| `tests/db/` (3 files) | 86 | **real PostgreSQL**: migrations up and down, an exact privilege matrix per role, behaviour of each role, constraints, the append-only audit log (need `MINISAT_TEST_ADMIN_URL`) |
 
 Run subsets with `pytest tests/test_udp.py -q`, or one test with `pytest -k eclipse`. To include the schema check: `XTCE_ONLINE=1 pytest -q`.
 
@@ -693,12 +739,14 @@ Run subsets with `pytest tests/test_udp.py -q`, or one test with `pytest -k ecli
 * The generated database is up to date and valid against the XTCE 1.2 schema; the independent interpreter agrees with the codec on all packets and commands.
 * 14 injected bugs were each caught (section 6).
 * A real end-to-end session over UDP (simulator, listener, three commands) works as shown in section 3.3.
+* The database layer (section 3.5): the 86 database tests passed on PostgreSQL 14.18 (a local server) and on PostgreSQL 16.15 started by `docker compose up -d db`
+  (where the init script, role logins and `alembic upgrade head` were also tried by hand), on Python 3.12.
 
 **Not verified yet - do these first:**
 
 * **Yamcs has never been started with this configuration.** The environment this was written in could not download from Maven Central. Everything about Yamcs (class names, option names, how the restriction criteria and the command assignments are interpreted)
   was checked against the Yamcs 5.13.7 source code and schema, not by running it. `mvn yamcs:run` may need small fixes. The `pom.xml` is modelled on the official quickstart and is well-formed, but dependency resolution is untested.
-* **GitHub Actions** (`.github/workflows/ci.yml`) has not run yet, and Python 3.10 has not been run anywhere.
+* **GitHub Actions** (`.github/workflows/ci.yml`, including the new `database` job) has not run yet, and Python 3.10 has not been run anywhere.
 * **The Python-side package has only been run on Linux.**
 
 **Limits of the model (say these out loud if you present the project):**
