@@ -1,0 +1,18 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+# program output (docs/ is committed on purpose; this is where you write your own runs)
+demo_out/
+*.bin
+# Maven / Yamcs runtime output (database, logs)
+yamcs/target/
+# editors / OS
+.idea/
+.vscode/
+.DS_Store

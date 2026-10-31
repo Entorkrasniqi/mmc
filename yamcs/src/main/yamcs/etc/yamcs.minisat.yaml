@@ -1,0 +1,75 @@
+# Configuration of one spacecraft ("instance"): where its telemetry comes from, where its commands go, which
+# mission database describes the packets, and what gets archived.
+
+services:
+  # Things that store data. Together they give you the history shown in the web interface.
+  - class: org.yamcs.archive.XtceTmRecorder          # every raw telemetry packet
+  - class: org.yamcs.archive.ParameterRecorder       # every decoded parameter value
+  - class: org.yamcs.archive.AlarmRecorder
+  - class: org.yamcs.archive.EventRecorder
+  - class: org.yamcs.archive.ReplayServer
+  - class: org.yamcs.parameter.SystemParametersService
+    args:
+      producers:
+        - fs
+        - jvm
+  # The "realtime" processor decodes live telemetry and releases commands (see processor.yaml).
+  - class: org.yamcs.ProcessorCreatorService
+    args:
+      name: realtime
+      type: realtime
+  - class: org.yamcs.archive.CommandHistoryRecorder
+  - class: org.yamcs.parameterarchive.ParameterArchive
+    args:
+      realtimeFiller:
+        enabled: true
+  - class: org.yamcs.plists.ParameterListService
+  - class: org.yamcs.timeline.TimelineService
+
+dataLinks:
+  # TELEMETRY IN: the simulator sends one UDP datagram per CCSDS packet to this port.
+  - name: tm-in
+    class: org.yamcs.tctm.UdpTmDataLink
+    stream: tm_realtime
+    port: 10015                                      # = links.tm_udp_port in spec/minisat.yaml
+    # A built-in preprocessor, so no Java code is needed. It only extracts the packet's generation time (so that
+    # Yamcs shows the SATELLITE's clock, not the arrival time); everything else is done by the XTCE database.
+    packetPreprocessorClassName: org.yamcs.tctm.GenericPacketPreprocessor
+    packetPreprocessorArgs:
+      timestampOffset: 6          # the secondary header starts right after the 6-byte CCSDS primary header
+      seqCountOffset: -1          # do not read a sequence count from the packet (the generic reader expects a 4-byte
+                                  # field; our CCSDS count is 14 bits inside the primary header)
+      timeEncoding:
+        epoch: UNIX               # the 8-byte value counts from 1970-01-01T00:00:00 UTC ...
+        type: FIXED
+        size: 8
+        multiplier: 1             # ... in milliseconds
+
+  # TELECOMMANDS OUT: every command Yamcs releases is sent as one UDP datagram to the simulator.
+  - name: tc-out
+    class: org.yamcs.tctm.UdpTcDataLink
+    stream: tc_realtime
+    host: 127.0.0.1
+    port: 10025                                      # = links.tc_udp_port in spec/minisat.yaml
+    # The generic postprocessor sends exactly the bytes the XTCE command definition produces (no CRC, no counters).
+    commandPostprocessorClassName: org.yamcs.tctm.GenericCommandPostprocessor
+
+mdb:
+  # The mission database: GENERATED from spec/minisat.yaml by `minisat gen-xtce`. Do not edit it by hand.
+  - type: xtce
+    args:
+      file: mdb/minisat.xml
+
+# Internal "pipes" (streams) that connect the links, the processor and the archive. Unchanged from the Yamcs quickstart.
+streamConfig:
+  tm:
+    - name: "tm_realtime"
+      processor: "realtime"
+    - name: "tm_dump"
+  cmdHist: ["cmdhist_realtime", "cmdhist_dump"]
+  event: ["events_realtime", "events_dump"]
+  param: ["pp_realtime", "pp_dump", "sys_param", "proc_param"]
+  parameterAlarm: ["alarms_realtime"]
+  tc:
+    - name: "tc_realtime"
+      processor: "realtime"

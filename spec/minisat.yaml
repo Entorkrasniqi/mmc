@@ -1,0 +1,85 @@
+# MiniSat - Interface Control Document (ICD) in one file.
+#
+# This is the SINGLE SOURCE OF TRUTH for the telemetry/telecommand interface of the fictional satellite:
+#   * the Python simulator packs and unpacks packets according to it,
+#   * `minisat gen-xtce` turns it into the XTCE database that Yamcs (the mission control system) loads.
+# If you change a field here, regenerate the database:  minisat gen-xtce
+#
+# Wire format (all numbers big-endian):
+#   telemetry packet   = CCSDS primary header (6 bytes) | secondary header: spacecraft time (8 bytes) | fields
+#   telecommand packet = CCSDS primary header (6 bytes) | command id (2 bytes) | arguments
+# Spacecraft time = milliseconds since 1970-01-01T00:00:00 UTC, unsigned 64-bit.
+
+mission:
+  name: MiniSat
+  description: Fictional 3U CubeSat bus, used to learn ground-segment software. Not a real spacecraft.
+
+links:
+  tm_udp_port: 10015      # the simulator sends telemetry to this port (Yamcs listens on it)
+  tc_udp_port: 10025      # the simulator listens here for telecommands (Yamcs sends to it)
+
+enums:
+  # NOTE: ON/OFF/YES/NO must be quoted. Unquoted, YAML 1.1 (which PyYAML implements) silently turns them into
+  # the booleans True/False - the famous "Norway problem" (the country code NO becomes False). The loader rejects
+  # this mistake with an explanatory message.
+  Mode:   {SAFE: 0, NOMINAL: 1, PAYLOAD: 2}
+  OnOff:  {"OFF": 0, "ON": 1}
+  YesNo:  {"NO": 0, "YES": 1}
+
+telemetry:
+  packets:
+    - name: Housekeeping
+      apid: 100
+      period_s: 1.0
+      description: Health of the satellite bus - mode, command counters, power and temperature.
+      fields:
+        - {name: mode,            type: uint8,   enum: Mode,  description: Current operating mode}
+        - {name: cmd_accepted,    type: uint16,               description: Number of telecommands accepted since boot}
+        - {name: cmd_rejected,    type: uint16,               description: Number of telecommands rejected since boot}
+        - {name: last_cmd_id,     type: uint16,               description: Id of the most recent telecommand (0 = none yet)}
+        - {name: uptime_s,        type: uint32,  unit: s,     description: Seconds since boot}
+        - {name: battery_voltage, type: float32, unit: V,     description: Battery terminal voltage,
+           limits: {warning: [6.8, 8.5], critical: [6.4, 8.6]}}
+        - {name: battery_soc_pct, type: float32, unit: "%",   description: Battery state of charge,
+           limits: {warning: [35, null], critical: [20, null]}}
+        - {name: battery_temp_c,  type: float32, unit: degC,  description: Battery temperature,
+           limits: {warning: [0, 35], critical: [-5, 45]}}
+        - {name: solar_current_a, type: float32, unit: A,     description: Current from the solar panels}
+        - {name: load_current_a,  type: float32, unit: A,     description: Current drawn by the satellite}
+        - {name: in_eclipse,      type: uint8,   enum: YesNo, description: Satellite is in the Earth's shadow}
+        - {name: heater,          type: uint8,   enum: OnOff, description: Battery heater state}
+
+    - name: Position
+      apid: 101
+      period_s: 5.0
+      description: Where the satellite is (sub-satellite point on the ground and height).
+      fields:
+        - {name: latitude_deg, type: float32, unit: deg, description: Geodetic latitude of the sub-satellite point}
+        - {name: longitude_deg, type: float32, unit: deg, description: Longitude of the sub-satellite point}
+        - {name: altitude_km, type: float32, unit: km, description: Height above the ground}
+
+telecommand:
+  apid: 10
+  commands:
+    - name: Noop
+      id: 1
+      description: Do nothing; only increments the accepted-command counter (a link test).
+    - name: SetMode
+      id: 2
+      description: Switch the operating mode.
+      args:
+        - {name: mode, type: uint8, enum: Mode, description: New mode}
+    - name: SetHeater
+      id: 3
+      description: Switch the battery heater on or off.
+      args:
+        - {name: state, type: uint8, enum: OnOff, description: New heater state}
+    - name: Reboot
+      id: 4
+      description: Restart the on-board computer (uptime restarts, mode becomes SAFE).
+      significance: vital
+    - name: SetTmRate
+      id: 5
+      description: Change the period of the Housekeeping telemetry.
+      args:
+        - {name: period_s, type: float32, unit: s, range: [0.1, 60], description: New period between Housekeeping packets}

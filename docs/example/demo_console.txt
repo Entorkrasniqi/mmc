@@ -1,0 +1,9 @@
+wrote docs/example/scenario.csv (1321 rows)
+  first_warning_h: 3.733
+  first_critical_h: 4.283
+  first_safe_after_payload_h: 5.433
+  min_soc_pct: 12.189
+  min_voltage_v: 6.198
+  final_cmd_accepted: 2
+  final_cmd_rejected: 1
+wrote docs/example/scenario.png

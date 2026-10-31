@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the package with its test dependencies
+        run: pip install -e ".[dev]"
+      - name: The generated XTCE database must be up to date with spec/minisat.yaml
+        run: minisat gen-xtce --check
+      - name: Unit, end-to-end (UDP) and XTCE interpreter tests
+        # XTCE_ONLINE=1 also validates the database against the official XTCE 1.2 schema, downloaded from the Yamcs repository
+        run: XTCE_ONLINE=1 pytest -q
+      - name: Offline demo scenario
+        run: minisat demo --hours 3 --out demo_out

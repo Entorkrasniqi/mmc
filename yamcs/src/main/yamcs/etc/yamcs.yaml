@@ -1,0 +1,21 @@
+# Server-level configuration: things that exist once per Yamcs server, not per spacecraft.
+
+services:
+  # The web interface and REST API. Open http://localhost:8090 once Yamcs is running.
+  - class: org.yamcs.http.HttpServer
+    args:
+      port: 8090
+      # Only reachable from this computer. Yamcs here has no login (no security section), so do NOT change this to
+      # 0.0.0.0 on a shared network: anybody who can reach the port could send commands.
+      address: "127.0.0.1"
+
+# Where Yamcs keeps its database (archived telemetry, command history ...). Relative paths are resolved from the
+# directory Yamcs runs in, which for 'mvn yamcs:run' is yamcs/target/yamcs, so `mvn clean` also wipes the data.
+dataDir: yamcs-data
+
+# The spacecraft ("instances") this server manages. Each name refers to a file yamcs.<name>.yaml next to this one.
+instances:
+  - minisat
+
+# Used to cryptographically sign login tokens. Irrelevant while there is no login; change it before ever exposing Yamcs.
+secretKey: changeme
