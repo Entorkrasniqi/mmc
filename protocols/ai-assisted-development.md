@@ -28,6 +28,7 @@ An assistant MUST NOT:
 - Add a dependency without stating why, its licence, and that it is compatible with AGPL-3.0.
 - Put secrets, tokens or real credentials in code, tests, fixtures, prompts or logs.
 - Run destructive operations (force-push, `reset --hard`, dropping a database, deleting files it has not looked at) without explicit confirmation.
+- Point `MINISAT_TEST_ADMIN_URL` at the development database. The database tests create and alter server-wide roles; use a throw-away server (`docker run --rm -d -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:16`). The fixtures refuse a server that has the development database.
 - Commit or push unless asked.
 - Say something works, passes, or is verified unless it ran that check in this session. "Should work" and "I believe" are the correct words for everything else.
 
@@ -64,7 +65,7 @@ Keep the entry-point instructions (`CLAUDE.md` or similar) short and link to the
 | --- | --- | --- |
 | Generated XTCE is current | `minisat gen-xtce --check` in CI and tests | Enforced (existing) |
 | Tests and lint pass | CI | Enforced (existing) |
-| No direct writes to operations tables | database grants; exact privilege matrix in `tests/db/test_privileges.py` | Enforced at the database (the runner module boundary is not built yet) |
+| No direct writes to operations tables | database grants; exact privilege matrix in `tests/db/test_privileges.py`; all writes in the code go through `ActionRunner` | Enforced at the database; the Python side by convention |
 | Licence check on dependencies | CI job | Not yet |
 | Secrets not committed | `.env` is git-ignored (`.env.example` has placeholders); secret scanning in CI | Partly (ignore rule only) |
 | Review before merge | branch protection | Not yet |

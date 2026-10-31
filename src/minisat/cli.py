@@ -187,6 +187,21 @@ def cmd_demo(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------------------------------------ ontology layer
+# These need the database dependencies (pip install -e ".[db]"), so they are imported only when used.
+
+def _need_db_extra(name):
+    def run(args):
+        try:
+            from .ontology import cli as ontology_cli
+            return getattr(ontology_cli, name)(args)
+        except ModuleNotFoundError as exc:
+            print(f"this command needs the database dependencies ({exc.name} is missing): "
+                  f"pip install -e \".[db]\"", file=sys.stderr)
+            return 2
+    return run
+
+
 # ------------------------------------------------------------------------------------------------ entry point
 
 def _percent(text: str) -> float:
@@ -247,6 +262,40 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hours", type=float, default=11.0)
     p.add_argument("--out", default="demo_out")
     p.set_defaults(func=cmd_demo)
+
+    p = sub.add_parser("db-seed", help="create the spacecraft, the automation account and (with --demo) sample operators")
+    p.add_argument("--spacecraft", default="MINISAT-1")
+    p.add_argument("--system-operator", default="automation", help="the account the automations act as")
+    p.add_argument("--operator", action="append", default=[], metavar="ID:NAME:ROLE",
+                   help="add an operator, e.g. alice:Alice:OPERATOR (roles: VIEWER OPERATOR SUPERVISOR AGENT)")
+    p.add_argument("--demo", action="store_true",
+                   help="add alice, bob, sam, tina, vera, an AI helper and a Helsinki station")
+    p.set_defaults(func=_need_db_extra("cmd_db_seed"))
+
+    p = sub.add_parser("ground", help="the ground station: store telemetry, run the automations, send released commands")
+    p.add_argument("--spacecraft", default="MINISAT-1")
+    p.add_argument("--system-operator", default="automation")
+    p.add_argument("--host", default="127.0.0.1", help="where to listen for telemetry")
+    p.add_argument("--port", type=int, default=0, help="default: from the specification")
+    p.add_argument("--tc-host", default="127.0.0.1", help="where the satellite listens for telecommands")
+    p.add_argument("--tc-port", type=int, default=0, help="default: from the specification")
+    p.add_argument("--duration", type=float, default=0.0, help="stop after this many seconds (0 = run forever)")
+    p.set_defaults(func=_need_db_extra("cmd_ground"))
+
+    p = sub.add_parser("act", help="run an action as an operator, e.g. minisat act alice 'Propose Command' '{...json...}'")
+    p.add_argument("operator")
+    p.add_argument("action")
+    p.add_argument("params", nargs="?", help="the parameters as a JSON object")
+    p.add_argument("--no-contact-check", action="store_true",
+                   help="release commands without a planned contact window (for the simulator, which is always in contact)")
+    p.set_defaults(func=_need_db_extra("cmd_act"))
+
+    sub.add_parser("actions", help="list the actions, who may run them and their parameters").set_defaults(
+        func=_need_db_extra("cmd_actions"))
+
+    p = sub.add_parser("status", help="the spacecraft's health, open alarms and anomalies, recent commands and events")
+    p.add_argument("--spacecraft", default="MINISAT-1")
+    p.set_defaults(func=_need_db_extra("cmd_status"))
     return parser
 
 

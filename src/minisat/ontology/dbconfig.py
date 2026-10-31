@@ -13,7 +13,7 @@ import os
 from typing import Mapping, Optional
 from urllib.parse import quote
 
-__all__ = ["ROLES", "ROLE_NAMES", "ConfigError", "database_url"]
+__all__ = ["ROLES", "ROLE_NAMES", "ConfigError", "database_url", "libpq_url", "connect"]
 
 ROLE_NAMES = {"migrator": "migrator", "runner": "app_runner", "reader": "app_reader", "ingest": "ingest"}
 ROLES = tuple(ROLE_NAMES)
@@ -42,3 +42,15 @@ def database_url(role: str, env: Optional[Mapping[str, str]] = None) -> str:
     if not port.isdigit():
         raise ConfigError(f"MINISAT_DB_PORT must be a number, got {port!r}")
     return f"postgresql+psycopg://{ROLE_NAMES[role]}:{quote(password, safe='')}@{host}:{port}/{name}"
+
+
+def libpq_url(role: str, env: Optional[Mapping[str, str]] = None) -> str:
+    """The same connection as a plain libpq URL (``postgresql://...``) for psycopg and psql."""
+    return database_url(role, env).replace("postgresql+psycopg://", "postgresql://", 1)
+
+
+def connect(role: str, env: Optional[Mapping[str, str]] = None, **kwargs):
+    """A psycopg connection as ``role``; rows come back as dicts. The caller closes it."""
+    import psycopg
+    from psycopg.rows import dict_row
+    return psycopg.connect(libpq_url(role, env), row_factory=dict_row, **kwargs)

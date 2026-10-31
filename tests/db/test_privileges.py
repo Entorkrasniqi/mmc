@@ -31,7 +31,7 @@ MATRIX = {
     "app_reader": (READER_TABLES, {}),
     "app_runner": (RUNNER_TABLES, {
         "spacecraft": {"health_status"}, "contact_window": EVERYTHING, "anomaly": EVERYTHING, "alarm": EVERYTHING,
-        "command_execution": EVERYTHING, "outbox": EVERYTHING}),
+        "command_execution": EVERYTHING, "outbox": EVERYTHING, "spacecraft_event": {"anomaly_id"}}),
     "ingest": (INGEST_TABLES, {"spacecraft": {"latest_values", "last_contact_at"}}),
 }
 

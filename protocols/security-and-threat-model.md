@@ -27,7 +27,7 @@ Everything crossing a boundary is untrusted until validated: browser input, mode
 | --- | --- | --- | --- | --- |
 | 1 | Anyone who can reach the TC UDP port can command the spacecraft | link | bind to `127.0.0.1`; in Compose, an internal network only; roadmap M5 (CRC) and M10 (message authentication) | Documented limit in README; not fixed |
 | 2 | Forged or garbled telemetry accepted | ingestion | strict decode (length, APID, type checks, already in `codec.py`); count rejects; sequence-gap detection (M3) | Partly enforced |
-| 3 | Unauthorised user runs an action | API | authenticate every request; role check in the runner; negative tests | Not yet |
+| 3 | Unauthorised user runs an action | CLI, API | authenticate every request; role check in the runner; negative tests | Role check enforced (`tests/db/test_runner.py`); **authentication is not built**: `minisat act` trusts the operator name it is given, and so does anything else that calls the runner directly |
 | 4 | Write path that bypasses the runner | database | separate DB roles; the reader and ingest roles cannot write operations tables; exact privilege matrix test | Enforced in the database (`tests/db/test_privileges.py`) |
 | 5 | Audit trail altered | database | no UPDATE/DELETE grants, plus a trigger that also refuses the owner and superusers; optional hash chain later | Enforced (trigger and grants); hash chain not done |
 | 6 | Prompt injection through notes, labels, imported data | agent | data/instruction separation; propose-only; evals ([agent-safety-and-autonomy.md](agent-safety-and-autonomy.md)) | Not yet |

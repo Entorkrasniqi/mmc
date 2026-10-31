@@ -89,7 +89,7 @@ For every agent run, store: the model name and version, the prompt template vers
 
 | Rule | Mechanism | State |
 | --- | --- | --- |
-| Agent cannot approve/release | role permission test | Not yet |
+| Agent cannot approve, release or acknowledge; it can propose, cancel its own proposals and open anomalies | `ActionRegistry` roles; exact role matrix over every action in `tests/db/test_runner.py`; the database refuses an agent as approver or acknowledger (`tests/db/test_constraints.py`); `agent_callable` flags checked in `test_registry_flags_and_schemas` | Enforced |
 | Tools only from the registry | agent runtime has no other tools; test | Not yet |
 | Injection scenarios | [agent-evaluation.md](agent-evaluation.md) suite as a CI gate | Not yet |
 | Rate limits and kill switch | runtime config + test | Not yet |

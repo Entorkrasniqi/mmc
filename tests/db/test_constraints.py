@@ -44,8 +44,14 @@ def proposal(**over):
     return base
 
 
+SENT_OR_LATER = ("SENT", "ACCEPTED", "REJECTED_ONBOARD", "VERIFIED", "FAILED")
+
+
 def approved(**over):
-    return proposal(**{"status": "APPROVED", "approved_by": "sam", "approved_at": T0, **over})
+    row = {"status": "APPROVED", "approved_by": "sam", "approved_at": T0, **over}
+    if row["status"] in SENT_OR_LATER:
+        row.setdefault("send_baseline", {})              # verification needs the telemetry from the moment of sending
+    return proposal(**row)
 
 
 # --------------------------------------------------------------------------------------------- commands
@@ -80,7 +86,7 @@ def test_an_agent_may_be_the_proposer(run):
 def test_a_command_cannot_go_beyond_proposed_without_an_approver(run):
     for status in ("APPROVED", "RELEASED", "SENT", "ACCEPTED", "VERIFIED", "FAILED"):
         violates(run, errors.CheckViolation, "command_execution", **proposal(status=status))
-    insert(run, "command_execution", **proposal(status="CANCELLED"))
+    insert(run, "command_execution", **proposal(status="CANCELLED", cancelled_by="alice", cancel_reason="not needed"))
 
 
 def test_approver_and_approval_time_go_together(run):
@@ -111,6 +117,20 @@ def test_valid_raw_bytes_and_rejection_reason_are_accepted(run):
     insert(run, "command_execution", **approved(status="SENT", raw_bytes_hex="100ac00000020002" + "02"))
     insert(run, "command_execution", **approved(
         status="REJECTED_ONBOARD", rejection_reason="battery too low for PAYLOAD mode (25 % < 30 %)"))
+
+
+def test_a_cancelled_command_records_who_cancelled_it_and_why(run):
+    violates(run, errors.CheckViolation, "command_execution", **proposal(status="CANCELLED"))
+    violates(run, errors.CheckViolation, "command_execution",
+             **proposal(status="CANCELLED", cancelled_by="alice", cancel_reason="  "))
+    violates(run, errors.ForeignKeyViolation, "command_execution",
+             **proposal(status="CANCELLED", cancelled_by="nobody", cancel_reason="x"))
+
+
+def test_a_sent_command_must_carry_the_telemetry_it_will_be_verified_against(run):
+    for status in SENT_OR_LATER:
+        violates(run, errors.CheckViolation, "command_execution",
+                 **approved(status=status, send_baseline=None, rejection_reason="r"))
 
 
 # --------------------------------------------------------------------------------------------- alarms

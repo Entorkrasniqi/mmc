@@ -71,3 +71,18 @@ def test_roles_have_no_dangerous_attributes(admin_conninfo, roles_ready):
     assert [r[0] for r in rows] == ["app_reader", "app_runner", "ingest", "migrator"]
     for name, sup, createdb, createrole, repl, login in rows:
         assert (sup, createdb, createrole, repl, login) == (False, False, False, False, True), name
+
+
+def test_migration_0002_downgrades_to_0001_and_upgrades_again(database_factory):
+    database = database_factory()
+    cfg = alembic_config(database.sqlalchemy_url("migrator"))
+
+    def columns():
+        with database.session("admin") as conn:
+            return {r[0] for r in conn.execute("SELECT column_name FROM information_schema.columns "
+                                               "WHERE table_schema = 'ops' AND table_name = 'command_execution'")}
+    assert {"preflight", "send_baseline", "cancelled_by", "expected_effect"} <= columns()
+    command.downgrade(cfg, "0001")
+    assert not ({"preflight", "send_baseline", "cancelled_by"} & columns())
+    command.upgrade(cfg, "head")
+    assert {"preflight", "send_baseline", "cancelled_by"} <= columns()

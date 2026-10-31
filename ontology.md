@@ -134,24 +134,24 @@ All writes happen here. Each action: authorise → validate → apply in one tra
 ### Propose Command
 - Changes: creates CommandExecution (PROPOSED), links Instance Of / Targets / Proposed By
 - Parameters: spacecraftId, commandName, arguments, reason (text), respondsToAlarmId (optional)
-- Who may run it: Operator, Supervisor, Agent
-- Validation: arguments type- and range-checked against CommandDefinition (same check as `encode_tc(validate=True)`); `preflightCommand` (§4) must not predict an on-board rejection, or the proposal carries a warning
-- Side effects: notify approvers if the command is VITAL
+- Who may run it: Operator, Supervisor, Agent, and the system (an automation may stage a proposal for a person to review)
+- Validation: arguments type- and range-checked against CommandDefinition (same check as `encode_tc(validate=True)`); the exact bytes are built now and stored, so the approver approves what will be sent; `preflightCommand` (§4) must not predict an on-board rejection, or the proposal carries a warning; at most one open execution per spacecraft and command
+- Side effects: none yet (notifying approvers of a VITAL command is not built)
 - Agent-callable: **yes**; human confirmation: n/a (this only *proposes*)
 
 ### Approve Command
 - Changes: CommandExecution PROPOSED → APPROVED; links Approved By
 - Parameters: executionId, note
 - Who may run it: Operator (NORMAL commands), Supervisor (VITAL commands)
-- Validation: approver ≠ proposer for VITAL; proposal not older than 15 minutes; spacecraft state has not changed by more than a tolerance since the preflight check (otherwise re-run it)
+- Validation: approver ≠ proposer for VITAL (and a VITAL command needs a supervisor); proposal not older than 15 minutes; the preflight is re-run against the state now, and a predicted on-board rejection can be approved only by a supervisor with a written note
 - Agent-callable: **no**
 
 ### Release Command
 - Changes: APPROVED → RELEASED → SENT; hands the bytes to the link (UDP now, Yamcs later); starts verification
 - Parameters: executionId
 - Who may run it: Operator, Supervisor
-- Validation: a ContactWindow is ACTIVE (or `overrideNoContact` with a reason, supervisors only)
-- Side effects: send telecommand; a verification timer watches `cmdAccepted`, `cmdRejected`, `lastCmdId`
+- Validation: a ContactWindow covers now (planned or active), or a supervisor gives an `override_reason`; the approval has not expired; **no other command of this spacecraft is in flight** (RELEASED, SENT or ACCEPTED). Telemetry reports counters, not which command they belong to, so one command at a time keeps verification sound until commands are acknowledged individually (PUS, roadmap M8)
+- Side effects: the bytes are queued in the outbox; the outbox worker marks the command SENT and puts it on the link **at most once** (a command is never re-sent by itself); automations then watch `cmd_accepted`, `cmd_rejected`, `last_cmd_id`
 - Agent-callable: **no**
 
 ### Cancel Command
@@ -175,13 +175,13 @@ All writes happen here. Each action: authorise → validate → apply in one tra
 ### Update Anomaly
 - Changes: status transitions OPEN → INVESTIGATING → RESOLVED; rootCause, resolutionNote
 - Who may run it: Operator, Supervisor. Resolving requires a root cause.
-- Agent-callable: may add notes, may not resolve
+- Agent-callable: no (adding notes for the agent needs a place to store them, which is not built; planned with the agent in phase 6)
 
 ### Plan Contact
 - Changes: creates or updates ContactWindow
 - Parameters: spacecraftId, stationId, startAt, endAt
-- Who may run it: Supervisor, `leo-contact-planner` import
-- Validation: no overlap on the same station
+- Who may run it: Supervisor, `leo-contact-planner` import (the system)
+- Validation: no overlap on the same station (the database refuses overlapping contacts that are not MISSED)
 
 ### Not an action: changing the interface itself
 Adding a parameter, changing an alarm limit or adding a command is **a pull request to `spec/minisat.yaml`** followed by `minisat gen-xtce` and a database migration. Runtime edits of limits would let the ground and the XTCE database drift apart.
@@ -196,11 +196,19 @@ Adding a parameter, changing an alarm limit or adding a command is **a pull requ
 - `packetLoss(spacecraft, window) -> int`: from gaps in the CCSDS sequence counter per APID (roadmap M3).
 
 ## 5. Automations
-- When a TelemetrySample leaves its warning or critical band, **create Alarm** (apply). When it returns inside the band, set `clearedAt`.
-- When a CommandExecution is SENT and `cmdAccepted` rises → ACCEPTED, then if `expectedEffect` appears within 5 s → VERIFIED (apply). If `cmdRejected` rises instead → REJECTED_ONBOARD with the satellite's reason from the log (apply). If neither happens in 10 s → FAILED (apply).
-- When `mode` becomes SAFE and no SetMode/Reboot execution explains it → **create SpacecraftEvent (FDIR) and Open Anomaly** (apply) and notify supervisors.
-- When `estimateTimeToSafe` < 30 min and mode is PAYLOAD → **stage** a Propose Command `SetMode NOMINAL` for human review (staged, never auto-released).
-- When no packet arrives for 3 × the packet period → mark ContactWindow/link stale and raise a link Alarm (apply).
+Built in phase 3 (`src/minisat/ontology/automation.py`); all of it runs as the SYSTEM operator through the action runner:
+
+- When a telemetry value leaves its warning or critical band, **Raise Alarm**; if the severity changes, **Update Alarm**; when it returns inside the band, **Clear Alarm**. One open alarm per parameter. A NaN or infinite value is never judged.
+- The derived health status (NOMINAL, WARNING, CRITICAL, SAFE_MODE; SAFE_MODE wins) is updated after every packet.
+- When a CommandExecution is SENT and the counters show it (`cmd_accepted` rose and `last_cmd_id` is the command's id) → ACCEPTED; then, if the `expected_effect` shows in telemetry → VERIFIED (a command with no visible effect is verified by the counter alone). If `cmd_rejected` rose instead → REJECTED_ONBOARD (telemetry does not carry the satellite's reason; that is in its own log). If nothing shows within 5 s of sending, or the effect is missing 10 s after sending → FAILED. A reboot is recognised by the uptime reset, since it wipes the counters.
+- When `mode` becomes SAFE and no accepted SetMode explains it → record an FDIR event and **Open Anomaly** ("Unplanned SAFE mode", HIGH, linked to the open alarms and the event); a HIGH anomaly queues a notification for supervisors.
+- Events are derived from what changed between packets: mode changes, reboots, command accepted/rejected, eclipse entry and exit, and packet loss from gaps in the CCSDS sequence counter.
+- No telemetry for 3 × the Housekeeping period is recorded as a LINK_LOST event (LINK_RESTORED when it returns). This is an event, not an alarm, because alarms in this model are about telemetry parameters.
+- A proposal or approval that expired without being released is cancelled by the system.
+
+Not built yet:
+
+- When `estimateTimeToSafe` < 30 min and mode is PAYLOAD → **stage** a Propose Command `SetMode NOMINAL` for human review (staged, never auto-released). It needs the `estimateTimeToSafe` function (§4).
 
 ## 6. Interfaces (shared shapes)
 - **Alarmable**: `warningLow/High`, `criticalLow/High`. Implemented by TelemetryParameter; any future derived parameter reuses it.

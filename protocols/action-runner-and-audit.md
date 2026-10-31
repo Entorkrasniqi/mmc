@@ -18,6 +18,23 @@ State changes only through actions. There is one runner, and it does the same st
 
 Failures at steps 1-3 are returned to the caller with a specific error and are also audited (as `DENIED` or `INVALID`) because refused attempts matter.
 
+## What the code does today
+
+`src/minisat/ontology/runner.py` implements the steps above and `tests/db/test_runner.py` pins them down. Details worth knowing:
+
+- **Order of checks:** unknown operator, unknown action, role, parameter validation, idempotency replay, then the handler's own rules (lifecycle,
+  two-person rule, expiry ...). A refusal at any step is audited as DENIED or INVALID in its own transaction; whatever the handler had already
+  written is rolled back first. A change the database refuses that the handler did not foresee is audited as ERROR.
+- **The audit row holds** the normalised parameters, snapshots of the changed rows before and after (`to_jsonb`), the result and the warnings
+  (inside `after`, as `_result` and `_warnings`, which is what an idempotent replay returns), the correlation ID and the idempotency key.
+- **Idempotency:** a key belongs to one action; the same key with the same parameters returns the stored result (`replayed=True`); with other parameters it is
+  refused; two identical requests at the same moment produce one change (the unique index decides, the loser replays the winner).
+- **The outbox is infrastructure, not business state.** The action inserts the message; the worker claims it (a lease, so no other worker takes it) and completes it.
+  Those claims and completions are direct updates by the worker, not actions. For telecommands the worker records the command as SENT first (an audited action that also
+  completes the message) and only then sends, so a command is delivered **at most once**: a crash can lose a send, never repeat one.
+- **Operators, spacecraft and ground stations are reference data** created by an administrator (`minisat db-seed`, as the migrator role), not by actions.
+- **Time:** every timestamp an action writes comes from the runner's injected clock, so tests move time by hand.
+
 ## Action definition
 
 Each action is one registered definition:
@@ -94,7 +111,8 @@ The application connects as `app_reader` by default and uses `app_runner` inside
 
 | Rule | Mechanism | State |
 | --- | --- | --- |
-| Single write path | database: only `app_runner` can write (`tests/db/test_privileges.py`); Python module boundary and test | Database part enforced; runner not built yet |
+| Single write path | database: only `app_runner` can write (`tests/db/test_privileges.py`); the runner is the only code that connects as that role to change business state (the worker's outbox claims are the documented exception) | Enforced at the database; the Python boundary is by convention, not by test |
+| Every attempt audited, atomic with the change, idempotent | `ActionRunner`; `tests/db/test_runner.py` (exact role matrix over every registered action, one audit row per attempt, rollback when the audit insert fails, concurrent identical requests) | Enforced |
 | Append-only audit | no UPDATE/DELETE grants **and** a trigger that also stops the owner and superusers; tests as every role | Enforced |
 | Role separation | `db/roles.sql`, `db/database.sql` (used by Docker and the tests); exact privilege matrix test | Enforced |
 | Idempotency keys, lifecycle consistency, two-person rule, human-only approval | constraints and indexes in `migrations/versions/0001_operations_schema.py`; `tests/db/test_constraints.py` | Enforced in the database; the runner must still enforce them with good error messages |

@@ -30,8 +30,8 @@ produce nothing).*
 > the project is being extended into an ontology-based mission-control application: a PostgreSQL store with an audit trail, an action
 > runner, a web dashboard and an AI assistant that may propose commands but never send them. The design is in
 > [`ontology.md`](ontology.md), the plan and what is done in [`PLAN.md`](PLAN.md), and the engineering rules in
-> [`protocols/`](protocols/README.md). So far only the database layer exists (section 3.5); everything else in this README
-> describes the simulator side.
+> [`protocols/`](protocols/README.md). So far the database, the action runner and the ground station that feeds it exist
+> (sections 3.5 and 3.6); there is no web dashboard or AI assistant yet. Everything else in this README describes the simulator side.
 
 ---
 
@@ -261,7 +261,7 @@ cd mini-mission-control
 python3 -m venv .venv && source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"                                    # the package + pytest, lxml, matplotlib
 minisat info                                               # the telemetry/telecommand interface, from the specification
-pytest -q                                                  # 221 tests in about 20 seconds; 86 database tests skip themselves (section 3.5)
+pytest -q                                                  # 251 tests in about 20 seconds; 259 database tests skip themselves (section 3.5)
 ```
 
 Run the commands from the repository root: the default specification path is `spec/minisat.yaml`. (Use `minisat --spec other.yaml <command>`
@@ -345,6 +345,11 @@ Only one program can listen on a UDP port at a time, so run **either** `minisat 
 | `minisat send-tc COMMAND [name=value ...] [--host H] [--port P]` | validates and sends a command; enum arguments accept labels (`mode=PAYLOAD`) or numbers |
 | `minisat decode FILE` | decodes a recording (`-` reads standard input) |
 | `minisat demo [--hours H] [--out DIR]` | offline scenario, CSV and plot |
+| `minisat db-seed [--demo] [--operator ID:NAME:ROLE ...]` | creates the spacecraft, the `automation` account and operators in the database (needs `.[db]`, section 3.5) |
+| `minisat ground [--duration S]` | the ground station: stores telemetry, raises alarms, verifies and sends commands (section 3.6) |
+| `minisat act OPERATOR "ACTION" '{json}' [--no-contact-check]` | runs one action as an operator; refusals exit with code 2 |
+| `minisat actions` | lists the actions, who may run them and their parameters |
+| `minisat status` | health, open alarms and anomalies, recent commands and events from the database |
 
 Exit codes: 0 success, 1 a runtime problem (stale database, damaged recording, nothing received), 2 bad input (unknown command, bad value, bad or missing specification).
 
@@ -407,14 +412,44 @@ even for the owner). Several rules of the ontology are also enforced by the data
 only a person (not an agent) approves a command or acknowledges an alarm, a command cannot go beyond PROPOSED without an approver, one open alarm per parameter,
 no overlapping contacts on one station.
 
-The database tests run against a real server, with no mocks:
+The database tests run against a real server, with no mocks. **Use a throw-away server, never your development database**: the tests create and change the four
+roles, which belong to the whole server, so they would reset the passwords of your development roles (the tests refuse to run on a server that has a database called `minisat`).
 
 ```bash
-MINISAT_TEST_ADMIN_URL=postgresql://postgres:PASSWORD@localhost:5432/postgres pytest -q tests/db
+docker run --rm -d --name minisat-test-pg -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:16
+MINISAT_TEST_ADMIN_URL=postgresql://postgres:test@127.0.0.1:55432/postgres pytest -q tests/db
+docker stop minisat-test-pg
 ```
 
-They need a superuser URL and the `psql` program; each run creates and drops scratch databases. Without the variable they skip. Set `MINISAT_REQUIRE_DB=1` to make
+They need a superuser URL and the `psql` program; each test works in a scratch database that is dropped afterwards. Without the variable they skip. Set `MINISAT_REQUIRE_DB=1` to make
 a missing server a failure instead (the CI job does).
+
+### 3.6 Running the ground station and the actions
+
+The **ground station** receives the telemetry, stores it in the database and reacts to it (alarms, events, anomalies, command verification). People change things only through
+**actions**, which check who is asking, validate, apply the change together with its audit row, and refuse what the rules forbid ([`protocols/action-runner-and-audit.md`](protocols/action-runner-and-audit.md)).
+The commands below use the database from section 3.5 and read its settings from `.env`.
+
+```bash
+minisat db-seed --demo               # MINISAT-1, an "automation" account, operators alice bob sam tina vera and an AI helper, a station
+minisat simulate --soc 30            # terminal 1: the satellite, with a battery that starts below the 35 % warning limit
+minisat ground                       # terminal 2: stores telemetry, raises alarms, sends released commands
+minisat status                       # terminal 3: what the database says now
+```
+
+Then change something, as a person would. Replace the id with the one printed by the first command:
+
+```bash
+minisat actions                                                   # every action, who may run it, its parameters
+minisat act alice "Propose Command" '{"spacecraft_id":"MINISAT-1","command":"SetHeater","arguments":{"state":"ON"},"reason":"warm the battery"}'
+minisat act bob   "Approve Command" '{"execution_id":"<id>"}'
+minisat act bob   "Release Command" '{"execution_id":"<id>"}' --no-contact-check   # the simulator is always in contact
+minisat status                                                    # SENT, then ACCEPTED, then VERIFIED, from the satellite's own telemetry
+```
+
+Things worth trying: approve a command as `vera` (a viewer) or `helper` (the AI agent) and read the refusal; propose `Reboot` as `sam` and approve it as `sam` (two-person rule),
+then as `tina`; propose `SetMode` `PAYLOAD` while the battery is below 30 % and see the warning and why an operator cannot approve it; start `minisat simulate --soc 14` (below the 15 % at which the satellite protects itself) and watch it go to SAFE mode within a second, which the ground station
+records as an FDIR event and an anomaly. Every attempt, successful or refused, is a row in `ops.audit_log`.
 
 ---
 
@@ -663,7 +698,9 @@ A generated file that nobody has loaded into the real program is the kind of thi
 5. **The official schema.** The generated file is validated against the XTCE 1.2 XSD that Yamcs ships (`tools/validate_xtce.py`, using `lxml`). It also fails correctly on a deliberately damaged file.
 6. **Mutation checks** (`python tools/mutation_check.py`, about 80 seconds; not part of the normal suite): the script injects 14 deliberate bugs into copies of the code (wrong byte order for the time field or for floats, an off-by-one in the length field written into the XTCE, a wrong sequence-flag value, a shifted
    sequence-count field, swapped warning/critical limits in the XTCE, wrong restriction values for the APID or the secondary-header flag, a command id off by one, inverted eclipse logic, a disabled on-board protection, a disabled range check, and two spec changes without regenerating the database). **Every one is caught by at least one test**; run the script yourself to see which test notices which bug. With `MINISAT_TEST_ADMIN_URL` set (section 3.5) it
-   also injects 14 database bugs (an extra grant, a removed constraint, a disabled audit trigger, a lifted two-person rule ...); all 28 were caught on the last run.
+   also injects 37 more: 14 in the SQL (an extra grant, a removed constraint, a disabled audit trigger, a lifted two-person rule ...) and 23 in the runner, the command lifecycle and the
+   automations (an expired approval accepted, two commands in flight, an unplanned SAFE mode not reported, a command "verified" without checking its effect, a command re-sent ...);
+   all 51 mutations were caught on the last run.
 7. **Platforms.** The 197 tests passed on Python 3.11, 3.12 and 3.13, and a clean `pip install` into a fresh virtual environment gave a working `minisat` command. Python 3.10 (the minimum declared) has not been run locally; it is in the CI matrix.
 
 **What this does not prove.** None of it proves that *Yamcs* accepts the configuration and interprets the database as intended: that needs a run (section 3.4). The interpreter encodes my understanding of XTCE and of Yamcs's behaviour,
@@ -691,9 +728,11 @@ The packet and database side works for any specification.
 mini-mission-control/
 ├── spec/minisat.yaml                 the interface specification (the single source of truth)
 ├── src/minisat/                      the Python package: spec, ccsds, codec, xtce, model, simulator, demo, cli
-│   └── ontology/                     definitions.py (read-only, from the spec), dbconfig.py (database roles and URLs)
+│   └── ontology/                     definitions.py (read-only, from the spec), functions.py (preflight, effects, events, health),
+│       │                             runner.py + actions/ (the action runner and every action), ingest.py, automation.py, worker.py,
+│       │                             ground.py (the ground station), seed.py, cli.py, dbconfig.py (database roles and URLs)
 ├── db/                               roles.sql, database.sql and init/ : the database roles and lock-down (used by Docker and the tests)
-├── migrations/                       Alembic migrations of the operations schema (run as the migrator role)
+├── migrations/                       Alembic migrations: 0001 operations schema, 0002 command context and more events
 ├── docker-compose.yml, .env.example  the PostgreSQL service and its settings (copy to .env)
 ├── ontology.md, PLAN.md              the domain model and the plan (what is done, what is next)
 ├── protocols/                        engineering protocols and architecture decision records (adr/)
@@ -702,9 +741,9 @@ mini-mission-control/
 │   └── src/main/yamcs/
 │       ├── etc/                      yamcs.yaml, yamcs.minisat.yaml, processor.yaml
 │       └── mdb/minisat.xml           the GENERATED XTCE database (do not edit by hand)
-├── tests/                            221 tests + 86 database tests (table below), xtce_interp.py (the independent XTCE reader)
+├── tests/                            252 tests + 259 database tests (table below), xtce_interp.py (the independent XTCE reader)
 ├── tools/validate_xtce.py            checks an XTCE file against the official XSD
-├── tools/mutation_check.py           injects 14 known bugs (plus 14 database bugs with a server) and checks that the tests notice every one
+├── tools/mutation_check.py           injects 14 known bugs (plus 37 database and logic bugs with a server) and checks that the tests notice every one
 ├── docs/                             scenario.png and docs/example/ (scenario.csv, demo_console.txt)
 ├── .github/workflows/ci.yml          GitHub Actions: Python 3.10-3.13, database up to date, tests, schema check, demo
 ├── LICENSE                           AGPL-3.0
@@ -725,7 +764,8 @@ mini-mission-control/
 | `test_yamcs_config.py` | 7 | ports, time offset and unit agree with the codec, built-in classes only, files exist |
 | `test_ontology_definitions.py` | 16 | definitions agree with the YAML read independently, hand-counted packet sizes, alarm severity boundaries, read-only |
 | `test_ontology_dbconfig.py` | 9 | database URLs per role, missing or odd settings |
-| `tests/db/` (3 files) | 86 | **real PostgreSQL**: migrations up and down, an exact privilege matrix per role, behaviour of each role, constraints, the append-only audit log (need `MINISAT_TEST_ADMIN_URL`) |
+| `test_ontology_functions.py` | 30 | preflight at the 30 % boundary, expected effects, what the counters say, derived events, health precedence, packet-loss counting |
+| `tests/db/` (9 files) | 259 | **real PostgreSQL** (need `MINISAT_TEST_ADMIN_URL`): migrations up and down, an exact privilege matrix per role, constraints, the append-only audit log; the runner (exact role matrix over every action, audit, atomicity, idempotency); the command lifecycle incl. every illegal transition; alarms and anomalies; ingestion and automations; the CLI; and the whole chain over **real UDP sockets** |
 
 Run subsets with `pytest tests/test_udp.py -q`, or one test with `pytest -k eclipse`. To include the schema check: `XTCE_ONLINE=1 pytest -q`.
 
@@ -739,8 +779,11 @@ Run subsets with `pytest tests/test_udp.py -q`, or one test with `pytest -k ecli
 * The generated database is up to date and valid against the XTCE 1.2 schema; the independent interpreter agrees with the codec on all packets and commands.
 * 14 injected bugs were each caught (section 6).
 * A real end-to-end session over UDP (simulator, listener, three commands) works as shown in section 3.3.
-* The database layer (section 3.5): the 86 database tests passed on PostgreSQL 14.18 (a local server) and on PostgreSQL 16.15 started by `docker compose up -d db`
+* The database layer (section 3.5): its tests passed on PostgreSQL 14.18 (a local server) and on PostgreSQL 16.15 started by `docker compose up -d db`
   (where the init script, role logins and `alembic upgrade head` were also tried by hand), on Python 3.12.
+* The action runner and the ground station (section 3.6): all 511 tests pass (510, the XTCE schema check skips) on PostgreSQL 16 from Docker, on Python 3.12; without a database
+  251 pass in a Python 3.11 environment that has only the base dependencies. The whole chain was also run by hand with the real `minisat simulate`, `ground` and `act` commands:
+  a low battery became an alarm, and a heater command went SENT, ACCEPTED, VERIFIED from the satellite's own telemetry.
 
 **Not verified yet - do these first:**
 
@@ -758,6 +801,12 @@ Run subsets with `pytest tests/test_udp.py -q`, or one test with `pytest -k ecli
 * The Yamcs setup has no users, no roles and no TLS.
 * Position is a spherical-Earth, circular-orbit approximation, good for plotting, not for navigation.
 * The XTCE generator covers the subset needed here (fixed-size integers and floats, enumerations, static alarms, simple commands). It is not a general XTCE writer.
+* **There is no login yet.** `minisat act alice ...` believes the operator name it is given, and anyone who has the database passwords can act as anyone. The roles, the two-person rule
+  and the audit log are real, but they bind the *actions*, not the person at the keyboard; authentication comes with the API (PLAN.md phase 4).
+* Command verification relies on counters and the id of the latest command, so only **one command can be in flight per spacecraft**; commands are delivered **at most once** and never retried.
+* Alarms have no hysteresis: a value hovering around a limit raises and clears alarms repeatedly. Verification windows (5 s and 10 s) are wall-clock values, not tuned to anything.
+* One ground station watches one spacecraft; notifications to supervisors are queued in the outbox but nothing delivers them beyond a log line.
+* Not built yet: the web dashboard, the HTTP API, the AI assistant, `estimateTimeToSafe` and the staged proposal that would use it.
 
 ---
 
