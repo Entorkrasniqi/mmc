@@ -1,0 +1,29 @@
+/*
+ * Copyright 2017 Palantir Technologies, Inc. All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { Direction } from "../direction";
+export function directionToDelta(direction) {
+    switch (direction) {
+        case Direction.UP:
+            return { cols: 0, rows: -1 };
+        case Direction.DOWN:
+            return { cols: 0, rows: +1 };
+        case Direction.LEFT:
+            return { cols: -1, rows: 0 };
+        case Direction.RIGHT:
+            return { cols: +1, rows: 0 };
+    }
+}
+//# sourceMappingURL=directionUtils.js.map

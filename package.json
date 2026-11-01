@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@blueprintjs/colors": "^5.1.16",
+    "@blueprintjs/core": "^6.21.0",
+    "@blueprintjs/datetime": "^6.3.0",
+    "@blueprintjs/docs-theme": "^6.2.7",
+    "@blueprintjs/eslint-config": "^6.2.1",
+    "@blueprintjs/icons": "^6.14.1",
+    "@blueprintjs/select": "^6.4.0",
+    "@blueprintjs/table": "^6.3.0"
+  }
+}
