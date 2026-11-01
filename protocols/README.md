@@ -4,7 +4,7 @@ Rules for building and running mini-mission-control, written for this project: t
 
 ## Status
 
-**Every protocol here is `Proposed`, and only some parts are enforced.** A rule counts as `Enforced` when a test, a database permission or a CI gate fails if it is broken, and the file says which one. Today that is the generated-database freshness check, the existing test suite, and (since phase 1 of [../PLAN.md](../PLAN.md)) the database roles, privileges, constraints and append-only audit log. Everything marked `Not yet` is a written intention, not a fact about the repository.
+**Every protocol here is `Proposed`, and only some parts are enforced.** A rule counts as `Enforced` when a test, a database permission or a CI gate fails if it is broken, and the file says which one. Today that is the generated-database freshness check, the existing test suite, and (since phase 1 of [../PLAN.md](../PLAN.md)) the database roles, privileges, constraints and append-only audit log; since phase 4, authentication and role checks over HTTP, health, metrics and correlation ids. Everything marked `Not yet` is a written intention, not a fact about the repository.
 
 Each file ends with an **Enforcement** section listing what would enforce it and its current state.
 

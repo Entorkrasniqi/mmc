@@ -38,3 +38,4 @@ What gets easier, what gets harder, what we now have to watch.
 | [0003](0003-local-web-app.md) | Local web app (React and Blueprint) | Accepted |
 | [0004](0004-agent-propose-only.md) | The in-app agent proposes, people decide | Accepted |
 | [0005](0005-containers-first.md) | Docker Compose now; Jenkins and Kubernetes later | Accepted |
+| [0006](0006-dashboard-chart-and-map-libraries.md) | Recharts for charts, d3-geo and Natural Earth for the map | Accepted |

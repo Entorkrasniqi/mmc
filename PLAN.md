@@ -4,7 +4,7 @@ How the project goes from "simulator and packet tools" to "ontology-based missio
 
 Every phase ends with something that runs and can be shown, and with its tests green. Work in small pull requests ([protocols/ci-cd-and-release.md](protocols/ci-cd-and-release.md)).
 
-Status legend: `[x]` done, `[ ]` not started. Phases 0, 1, 2 and 3 are done (details and the exceptions are listed in each); nothing after Phase 3 is started.
+Status legend: `[x]` done, `[ ]` not started. Phases 0 to 5 are done (details and the exceptions are listed in each); nothing after Phase 5 is started.
 
 ## Phase 0: Foundation (documents)
 
@@ -59,26 +59,33 @@ Goal: live data flows into the ontology and the system reacts to it.
 
 Done when: running the simulator with `--soc 30` produces an Alarm object and a Spacecraft record that updates without anyone touching the database.
 
-Result (2026-10-31): met, over real UDP sockets in `tests/db/test_ground_udp.py` and by hand with the real commands (README section 3.6). Full suite on PostgreSQL 16 in Docker: 510 passed, 1 skipped (the XTCE schema check); 251 pass without a database in an environment with only the base dependencies. **All 51 mutations (14 existing, 14 SQL, 23 in the Python logic) are caught.** Known limits: no authentication (`act` trusts the operator name), alarms have no hysteresis, the verification windows are untuned wall-clock values, `estimateTimeToSafe` and the staged proposal that uses it are not built, the GitHub Actions `database` job has still never run, Python 3.10 has not been run.
+Result (2026-10-31): met, over real UDP sockets in `tests/db/test_ground_udp.py` and by hand with the real commands (README section 3.6). Full suite on PostgreSQL 16 in Docker: 510 passed, 1 skipped (the XTCE schema check); 251 pass without a database in an environment with only the base dependencies. **All 51 mutations (14 existing, 14 SQL, 23 in the Python logic) are caught.** Known limits: no authentication (`act` trusts the operator name), alarms have no hysteresis, the verification windows are untuned wall-clock values, the staged proposal that uses `estimateTimeToSafe` is not built (the function itself came with phase 4), the GitHub Actions `database` job has still never run, Python 3.10 has not been run.
 
 ## Phase 4: API
 
-- [ ] FastAPI: read endpoints for objects, links and series; action endpoints generated from the registry
-- [ ] Authentication (dev token first, clearly marked dev-only) and role checks ([security-and-threat-model.md](protocols/security-and-threat-model.md))
-- [ ] `/health/live`, `/health/ready`, metrics, structured logs with correlation IDs ([observability-and-operations.md](protocols/observability-and-operations.md))
+Goal: everything the ontology holds, and every action, reachable over HTTP, with the safety rules intact.
+
+- [x] FastAPI (`src/minisat/api/`): read endpoints for objects, links and series (reads run as the `app_reader` role, in a read-only transaction with a statement timeout); one action endpoint per action, generated from the registry (the system's own actions are not exposed); `estimate_time_to_safe` and the preflight as read-only functions
+- [x] Authentication (a static bearer token per operator, **DEV ONLY**, `minisat dev-tokens`; the automation account cannot log in; no tokens configured = nobody gets in) and role checks (the action runner decides, and audits every refusal) ([security-and-threat-model.md](protocols/security-and-threat-model.md))
+- [x] `/health/live`, `/health/ready` (database, migration revision, fresh telemetry), `/metrics` (Prometheus), structured JSON logs with correlation IDs that reach the audit rows ([observability-and-operations.md](protocols/observability-and-operations.md))
+- [x] Migration 0003: the reader role may read `public.alembic_version` (the readiness check needs it); nothing else is granted
 
 Done when: the six questions in [ontology.md](ontology.md) §9 can be answered through the API.
+
+Result (2026-11-01): met. `tests/api/test_api_questions.py` builds each situation with the real parts (the satellite model, UDP-format packets, the ingestor, the automations, the outbox worker, the action runner behind HTTP) and answers the question by navigating from object to object; question 5 is compared with the real satellite model run forward. Full suite on PostgreSQL 16 in Docker: **681 passed, 1 skipped** (the XTCE schema check); 294 pass in a fresh environment with only the base dependencies. **All 26 API mutations are caught** (the first run missed two, a NaN sanitiser and millisecond rounding of a window, which the framework version hid; both now have tests that do not go through the framework). `estimate_time_to_safe` is new (it was not built in phase 3): it replays the satellite's own power model from the newest telemetry, aligns the eclipse schedule with the last eclipse transition seen in the samples, and is within 12 s of the real model when the solar wobble lines up and within about 3 % otherwise (measured over 120 starting states; the wobble phase cannot be seen from telemetry, and the real model itself varies by that much). Decisions taken: names are snake_case like the action parameters; operators see display names only unless they are supervisors (as ontology.md says); the API refuses to listen beyond this machine unless told to; a request's `X-Correlation-ID` is kept when it is a UUID. Known limits: the token login is not real authentication (no expiry, no revocation); one database connection per request, no rate limit, no notifications; `/metrics` cannot see the ground station's decode errors or packets per APID (another process, and samples do not record the APID); the GitHub Actions jobs for the API and the dashboard have not run on GitHub.
 
 ## Phase 5: Dashboard
 
 Goal: something to look at ([ADR 0003](protocols/adr/0003-local-web-app.md)).
 
-- [ ] `dashboard/` with Vite, React, TypeScript and Blueprint
-- [ ] Screens: spacecraft overview (state, charts with limit bands, eclipse), alarms, command workflow with approval and evidence, anomalies, ground track
-- [ ] Chart and map libraries chosen when this phase starts
-- [ ] A few end-to-end browser tests
+- [x] `dashboard/` with Vite, React, TypeScript and Blueprint (the dependencies live in the root `package.json`, where Blueprint was installed)
+- [x] Screens: spacecraft overview (state, charts with limit bands, eclipse, time to safe mode), alarms, command workflow with approval and evidence, anomalies, ground track; sign-in, roles shown in what each person is offered
+- [x] Chart and map libraries chosen ([ADR 0006](protocols/adr/0006-dashboard-chart-and-map-libraries.md)): Recharts, and d3-geo with Natural Earth land from the `world-atlas` package (no tile server, works offline)
+- [x] A few end-to-end browser tests (Playwright against the real stack, `npm run e2e`)
 
 Done when: you can start the stack, drain the battery with the demo scenario, watch the alarms fire, and recover the spacecraft with an approved command, in the browser.
+
+Result (2026-11-01): met, with one change to the story: the scripted satellite does not *drain*, it **starts at 14.9 %**, just under the 15 % at which it protects itself (`tools/e2e_stack.py`, as README 3.6 already suggests with `--soc 14`), because draining a real-time battery takes hours. **10 browser tests pass against the real stack** (PostgreSQL through `docker compose`, simulator, ground station, API, dashboard; nothing mocked): signing in, live telemetry and the limits on the charts, the unplanned SAFE mode and its anomaly, acknowledging the alarm, a viewer offered nothing to change, the two-person rule across two signed-in people, planning a contact window in the dashboard, recovering the spacecraft with an approved `SetMode NOMINAL` that the satellite's telemetry verifies, resolving the anomaly with a root cause, and the ground track. The browser run found three real bugs that no unit test had (a chart whose trace name collided with its time field and drew every point at one x; a misleading "no samples" while loading; the launcher leaving processes behind when Playwright killed it); each is fixed, the first with a regression test. Also: 128 unit and component tests (Vitest), a clean TypeScript check, a production build, and screenshots of the overview, commands, alarms, anomalies and map pages, checked by eye (they are in `docs/` and at the top of the README, with an animated walk-through of the whole story, `docs/dashboard-story.gif`). **Not verified:** a browser other than Chromium, the GitHub Actions `dashboard` job, and the layout on small screens. Known limits: the token is kept in `sessionStorage` (cleared when the tab closes); the bundle is one 1 MB file; no code in the dashboard renders agent or user text as HTML (React escapes it), which phase 6 must keep true. A repository note: `node_modules/` was committed in "libaries added" (about 63 000 files); `.gitignore` now ignores it, but they stay tracked until someone runs `git rm -r --cached node_modules`.
 
 ## Phase 6: AI agent
 
@@ -115,6 +122,6 @@ Pick by goal, not by default.
 | Decision | Needed by | Notes |
 | --- | --- | --- |
 | Which model provider and API for the agent | Phase 6 | cost, data terms, key handling |
-| Real login (OIDC) versus dev token | Phase 4 | dev token is fine locally; not for any shared deployment |
-| Chart and map libraries | Phase 5 | Blueprint has none |
+| Real login (OIDC) versus dev token | Phase 4 | **decided for now: dev token** (static, DEV ONLY, localhost only). Real login before any shared deployment |
+| Chart and map libraries | Phase 5 | **decided: Recharts and d3-geo** ([ADR 0006](protocols/adr/0006-dashboard-chart-and-map-libraries.md)) |
 | Repository name and layout | Phase 0 | the remote is `mmc.git` while the README says `mini-mission-control`; `dashboard/` and `evals/` are new top-level folders |

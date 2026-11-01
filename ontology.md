@@ -189,11 +189,11 @@ Adding a parameter, changing an alarm limit or adding a command is **a pull requ
 ## 4. Functions
 - `healthStatus(spacecraft) -> enum`: worst severity among ACTIVE alarms, or SAFE_MODE if mode is SAFE.
 - `preflightCommand(spacecraft, commandName, args) -> {accepted, reason}`: replays the on-board rules from `model.py` (PAYLOAD refused below 30 % charge, SetTmRate range) against current state. Lets an operator see "this would be rejected" before sending.
-- `estimateTimeToSafe(spacecraft) -> seconds | null`: from the SoC trend, current load and eclipse schedule, when does charge reach the 15 % FDIR threshold? Null if charging.
+- `estimateTimeToSafe(spacecraft[, command]) -> seconds | null`: from the SoC, the load of the (possibly commanded) mode and the eclipse schedule, when does charge reach the 15 % FDIR threshold? Null if it does not within the horizon (6 h by default). **Built in phase 4** (`functions.estimate_time_to_safe`, `POST /api/functions/estimate-time-to-safe`): it replays a copy of the satellite's own model, as `preflightCommand` does, and aligns the eclipse schedule with the last eclipse transition seen in the samples (worst case assumed when none was seen). It cannot see the phase of the model's solar wobble, so it is approximate (see `tests/test_ontology_time_to_safe.py` for the measured error).
 - `nextEclipse(spacecraft, from) -> {start, end}`: uses `Orbit.in_eclipse`.
 - `expectedEffect(commandName, args) -> list of {parameter, expected}`: what telemetry should show if the command worked (SetMode PAYLOAD → `mode = PAYLOAD`, `load_current_a` rises). Used for verification.
 - `isInContact(spacecraft, t) -> bool`.
-- `packetLoss(spacecraft, window) -> int`: from gaps in the CCSDS sequence counter per APID (roadmap M3).
+- `packetLoss(spacecraft, window) -> int`: from gaps in the CCSDS sequence counter per APID (roadmap M3). Built: the ground station records PACKET_LOSS events, and `GET /api/spacecraft/{id}/packet-loss` and the `packets_lost_observed` of each contact window sum them.
 
 ## 5. Automations
 Built in phase 3 (`src/minisat/ontology/automation.py`); all of it runs as the SYSTEM operator through the action runner:
@@ -208,7 +208,7 @@ Built in phase 3 (`src/minisat/ontology/automation.py`); all of it runs as the S
 
 Not built yet:
 
-- When `estimateTimeToSafe` < 30 min and mode is PAYLOAD → **stage** a Propose Command `SetMode NOMINAL` for human review (staged, never auto-released). It needs the `estimateTimeToSafe` function (§4).
+- When `estimateTimeToSafe` < 30 min and mode is PAYLOAD → **stage** a Propose Command `SetMode NOMINAL` for human review (staged, never auto-released). The function exists since phase 4; the automation does not.
 
 ## 6. Interfaces (shared shapes)
 - **Alarmable**: `warningLow/High`, `criticalLow/High`. Implemented by TelemetryParameter; any future derived parameter reuses it.
@@ -245,6 +245,6 @@ Not built yet:
 3. **Action registry and runner:** each action is a definition (parameter model, permission, validator, handler, side effects). One runner does authorise → validate → transaction → audit → side effects. Direct table writes are not exposed.
 4. **Ingestion adapter:** subscribes to the existing UDP telemetry (reusing `codec.py`), writes TelemetrySamples, updates Spacecraft latest values, emits events. A Yamcs adapter can replace it later without changing the ontology.
 5. **Functions and automations:** `preflightCommand` reuses `model.py` rules; the automations run in a small worker loop reading an outbox table.
-6. **API and dashboard:** FastAPI exposing objects, links and actions; the web dashboard from the previous step becomes a thin UI over it (object explorer, command workflow, alarm list, anomaly board).
+6. **API and dashboard:** FastAPI exposing objects, links and actions (built: `src/minisat/api/`); a React and Blueprint dashboard over it (built: `dashboard/`: overview, alarms, command workflow with evidence, anomaly board, ground track). The object explorer is not built.
 7. **Agent surface:** an MCP server generated from the registry.
 8. **Tests:** pytest as elsewhere. Add a test per action (permission, validation, audit row) and a test that no code path writes operations tables outside the runner.

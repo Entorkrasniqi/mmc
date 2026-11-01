@@ -1,0 +1,325 @@
+{
+  "Acknowledge Alarm": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "alarm_id": {
+          "format": "uuid",
+          "title": "Alarm Id",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "alarm_id"
+      ],
+      "title": "AcknowledgeAlarmParams",
+      "type": "object"
+    },
+    "slug": "acknowledge-alarm"
+  },
+  "Approve Command": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "execution_id"
+      ],
+      "title": "ApproveCommandParams",
+      "type": "object"
+    },
+    "slug": "approve-command"
+  },
+  "Cancel Command": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "reason"
+      ],
+      "title": "CancelCommandParams",
+      "type": "object"
+    },
+    "slug": "cancel-command"
+  },
+  "Open Anomaly": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "alarm_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Alarm Ids",
+          "type": "array"
+        },
+        "event_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Event Ids",
+          "type": "array"
+        },
+        "execution_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Execution Ids",
+          "type": "array"
+        },
+        "severity": {
+          "enum": [
+            "LOW",
+            "MEDIUM",
+            "HIGH"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "spacecraft_id": {
+          "title": "Spacecraft Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "spacecraft_id",
+        "title",
+        "severity"
+      ],
+      "title": "OpenAnomalyParams",
+      "type": "object"
+    },
+    "slug": "open-anomaly"
+  },
+  "Plan Contact": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "end_at": {
+          "format": "date-time",
+          "title": "End At",
+          "type": "string"
+        },
+        "max_elevation_deg": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Elevation Deg"
+        },
+        "spacecraft_id": {
+          "title": "Spacecraft Id",
+          "type": "string"
+        },
+        "start_at": {
+          "format": "date-time",
+          "title": "Start At",
+          "type": "string"
+        },
+        "station_id": {
+          "title": "Station Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "spacecraft_id",
+        "station_id",
+        "start_at",
+        "end_at"
+      ],
+      "title": "PlanContactParams",
+      "type": "object"
+    },
+    "slug": "plan-contact"
+  },
+  "Propose Command": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "additionalProperties": true,
+          "description": "argument values; enum arguments accept labels",
+          "title": "Arguments",
+          "type": "object"
+        },
+        "command": {
+          "description": "command name, e.g. SetMode",
+          "title": "Command",
+          "type": "string"
+        },
+        "reason": {
+          "description": "why this command is being proposed",
+          "title": "Reason",
+          "type": "string"
+        },
+        "responds_to_alarm_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Responds To Alarm Id"
+        },
+        "spacecraft_id": {
+          "title": "Spacecraft Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "spacecraft_id",
+        "command",
+        "reason"
+      ],
+      "title": "ProposeCommandParams",
+      "type": "object"
+    },
+    "slug": "propose-command"
+  },
+  "Release Command": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "override_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "supervisors only: release without a contact window",
+          "title": "Override Reason"
+        }
+      },
+      "required": [
+        "execution_id"
+      ],
+      "title": "ReleaseCommandParams",
+      "type": "object"
+    },
+    "slug": "release-command"
+  },
+  "Update Anomaly": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "anomaly_id": {
+          "format": "uuid",
+          "title": "Anomaly Id",
+          "type": "string"
+        },
+        "execution_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Execution Ids",
+          "type": "array"
+        },
+        "resolution_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolution Note"
+        },
+        "root_cause": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root Cause"
+        },
+        "status": {
+          "enum": [
+            "INVESTIGATING",
+            "RESOLVED"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "anomaly_id",
+        "status"
+      ],
+      "title": "UpdateAnomalyParams",
+      "type": "object"
+    },
+    "slug": "update-anomaly"
+  }
+}

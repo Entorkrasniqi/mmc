@@ -1,4 +1,18 @@
 {
+  "name": "mini-mission-control-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "The web dashboard of mini-mission-control: Vite, React, TypeScript and Blueprint (PLAN.md phase 5)",
+  "scripts": {
+    "dev": "vite --config dashboard/vite.config.ts",
+    "build": "tsc -p dashboard/tsconfig.json && vite build --config dashboard/vite.config.ts",
+    "preview": "vite preview --config dashboard/vite.config.ts",
+    "typecheck": "tsc -p dashboard/tsconfig.json",
+    "test": "vitest run --config dashboard/vite.config.ts",
+    "e2e": "playwright test --config dashboard/playwright.config.ts"
+  },
   "dependencies": {
     "@blueprintjs/colors": "^5.1.16",
     "@blueprintjs/core": "^6.21.0",
@@ -7,6 +21,29 @@
     "@blueprintjs/eslint-config": "^6.2.1",
     "@blueprintjs/icons": "^6.14.1",
     "@blueprintjs/select": "^6.4.0",
-    "@blueprintjs/table": "^6.3.0"
+    "@blueprintjs/table": "^6.3.0",
+    "d3-geo": "^3.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^3.10.1",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/d3-geo": "^3.1.1",
+    "@types/geojson": "^7946.0.16",
+    "@types/node": "^26.6.6",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@types/topojson-client": "^3.1.5",
+    "@vitejs/plugin-react": "^6.1.2",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   }
 }

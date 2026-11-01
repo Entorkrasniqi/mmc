@@ -65,7 +65,11 @@ Not a target now. When added, measure first (ingest rate, query latency for the 
 | Tests, lint, freshness check | CI | Enforced (existing) |
 | Mutation check | `tools/mutation_check.py`, run manually (about 80 s) | Manual |
 | Real-PostgreSQL tests | `tests/db` (needs `MINISAT_TEST_ADMIN_URL`; `MINISAT_REQUIRE_DB=1` turns a skip into a failure); CI `database` job with a service container | Enforced locally (PostgreSQL 14 and 16); CI job written, not yet run on GitHub |
-| Mutation check covers the database rules and the runner, lifecycle and automation logic | 37 extra mutations in `tools/mutation_check.py` (14 in SQL, 23 in Python), run when a server is configured | Manual (see PLAN.md for the last result) |
+| Mutation check covers the database rules and the runner, lifecycle and automation logic, and the HTTP API | 63 extra mutations in `tools/mutation_check.py` (14 in SQL, 23 in the runner, lifecycle and automations, 26 in the API and the time-to-safe estimate), run when a server is configured | Manual (see PLAN.md for the last result) |
+| API tests on real PostgreSQL and real ground-station parts | `tests/api` (needs `MINISAT_TEST_ADMIN_URL`); CI `database` job | Enforced locally; the CI job has not run on GitHub |
+| Dashboard unit and component tests, type check, build | `npm test`, `npm run typecheck`, `npm run build`; CI `dashboard` job | Enforced locally; the CI job has not run on GitHub |
+| Browser tests against the real stack | `npm run e2e` (Playwright, `tools/e2e_stack.py`; needs Docker) | Manual: 10 tests, about a minute; not in CI |
+| Generated fixture (action schemas for the dashboard) is current | `tests/test_dashboard_fixtures.py`, `tools/dump_action_schemas.py --check` | Enforced |
 | The tests never touch a development database | `roles_ready` in `tests/dbfixtures.py` fails if the server has a database named like `MINISAT_DB_NAME` (default `minisat`); roles are server-wide and the tests reset their passwords | Enforced |
 | Property tests | `hypothesis` | Not yet |
 | Mutation check in CI (nightly) | scheduled workflow | Not yet |

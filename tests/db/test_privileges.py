@@ -177,3 +177,21 @@ def test_nobody_can_change_the_audit_log_not_even_the_owner_or_a_superuser(db):
                 with pytest.raises(errors.InsufficientPrivilege, match="append-only"):
                     with conn.transaction():
                         conn.execute(statement)
+
+
+def test_only_the_reader_can_see_which_schema_revision_is_installed(db):
+    """Migration 0003 lets the API's readiness check read public.alembic_version; nobody else gets it, and nobody but the
+    migrator can change it."""
+    with db.session("admin") as conn:
+        for role in ("app_runner", "app_reader", "ingest", "migrator"):
+            granted = {p for p in PRIVILEGES + ["UPDATE"]
+                       if conn.execute("SELECT has_table_privilege(%s, 'public.alembic_version', %s)", (role, p)).fetchone()[0]}
+            assert granted == ({"SELECT"} if role == "app_reader" else {"SELECT", "INSERT", "DELETE", "TRUNCATE", "REFERENCES",
+                                                                        "TRIGGER", "UPDATE"} if role == "migrator" else set()), role
+    with db.session("reader") as conn:
+        assert conn.execute("SELECT version_num FROM public.alembic_version").fetchone()[0] == "0003"
+        denied(conn, "UPDATE public.alembic_version SET version_num = '0001'")
+        denied(conn, "DELETE FROM public.alembic_version")
+    for role in ("runner", "ingest"):
+        with db.session(role) as conn:
+            denied(conn, "SELECT * FROM public.alembic_version")
