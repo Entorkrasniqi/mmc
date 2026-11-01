@@ -46,9 +46,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install the package with the database dependencies
-        run: pip install -e ".[dev,db]"
-      - name: Database tests and ontology definitions
-        run: pytest -q tests/db tests/test_ontology_definitions.py tests/test_ontology_dbconfig.py
+      - name: Install the package with the database and API dependencies
+        run: pip install -e ".[dev,db,api]"
+      - name: Database tests, the HTTP API and the ontology definitions
+        run: pytest -q tests/db tests/api tests/test_api_settings.py tests/test_dashboard_fixtures.py tests/test_ontology_definitions.py tests/test_ontology_dbconfig.py tests/test_ontology_functions.py tests/test_ontology_time_to_safe.py
+      - name: The dashboard's test fixture matches the actions the API exposes
+        run: python tools/dump_action_schemas.py --check
       - name: The Docker Compose file is valid
         run: docker compose --env-file .env.example config --quiet
+
+  dashboard:
+    # the web dashboard (PLAN.md phase 5): types, unit tests, production build. The browser tests (npm run e2e) need Docker
+    # and a browser and are run by hand for now.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install the exact versions of the lockfile
+        run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Unit and component tests
+        run: npm test
+      - name: Production build
+        run: npm run build

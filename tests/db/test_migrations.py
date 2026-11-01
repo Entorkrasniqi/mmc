@@ -86,3 +86,17 @@ def test_migration_0002_downgrades_to_0001_and_upgrades_again(database_factory):
     assert not ({"preflight", "send_baseline", "cancelled_by"} & columns())
     command.upgrade(cfg, "head")
     assert {"preflight", "send_baseline", "cancelled_by"} <= columns()
+
+
+def test_migration_0003_gives_and_takes_back_the_readers_view_of_the_revision(database_factory):
+    database = database_factory()
+    cfg = alembic_config(database.sqlalchemy_url("migrator"))
+
+    def reader_can_see_it():
+        with database.session("admin") as conn:
+            return conn.execute("SELECT has_table_privilege('app_reader', 'public.alembic_version', 'SELECT')").fetchone()[0]
+    assert reader_can_see_it()
+    command.downgrade(cfg, "0002")
+    assert not reader_can_see_it()
+    command.upgrade(cfg, "head")
+    assert reader_can_see_it()

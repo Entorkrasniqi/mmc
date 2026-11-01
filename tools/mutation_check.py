@@ -3,8 +3,9 @@
 
     python tools/mutation_check.py            # takes a couple of minutes (14 copies, 14 test runs)
     MINISAT_TEST_ADMIN_URL=postgresql://postgres:...@localhost:5432/postgres python tools/mutation_check.py
-                                              # also injects 37 more bugs: database grants and constraints, the audit
-                                              # trigger, and the rules of the runner, the lifecycle and the automations
+                                              # also injects more bugs (see DB_MUTATIONS and API_MUTATIONS): database grants
+                                              # and constraints, the audit trigger, and the rules of the runner, the
+                                              # lifecycle, the automations and the HTTP API
 
 For each entry in MUTATIONS the script copies the project to a temporary directory, changes ONE thing (a "mutation":
 a deliberately wrong byte order, an off-by-one, a disabled safety check ...), optionally regenerates the XTCE database like a
@@ -139,11 +140,68 @@ DB_MUTATIONS = [
 ]
 
 
+API = "src/minisat/api/"
+MIGRATION_3 = "migrations/versions/0003_reader_sees_schema_revision.py"
+
+# The HTTP API (phase 4): who may call it, what it hands out, what it refuses to leak, and the arithmetic of its series.
+API_MUTATIONS = [
+    ("any token logs in", API + "auth.py", "if hmac.compare_digest(token, data):", "if True:", False),
+    ("the automation account can log in over HTTP", API + "auth.py", 'if row["kind"] == "SYSTEM":', "if False:", False),
+    ("the read routes do not need a caller", API + "routes_read.py",
+     'router = APIRouter(prefix="/api", dependencies=[Depends(current_principal)])', 'router = APIRouter(prefix="/api")', False),
+    ("the metrics are public", API + "app.py",
+     'summary="Prometheus metrics (needs a token)",\n             dependencies=[Depends(current_principal)])',
+     'summary="Prometheus metrics (needs a token)")', False),
+    ("the system's own actions are exposed over HTTP", API + "routes_actions.py",
+     'return [a for a in registry if a.roles - {"SYSTEM"}]', "return list(registry)", False),
+    ("every action runs as a supervisor", API + "routes_actions.py", "ctx.runner.run(principal.operator_id, action.name",
+     'ctx.runner.run("sam", action.name', False),
+    ("the correlation id is not given to the runner", API + "routes_actions.py", "body or {}, correlation_id=correlation_id,",
+     "body or {},", False),
+    ("the idempotency key is dropped", API + "routes_actions.py",
+     'idempotency_key=idempotency_key)\n            outcome, audit_id = "OK"',
+     'idempotency_key=None)\n            outcome, audit_id = "OK"', False),
+    ("everybody sees every operator's role", API + "routes_read.py", 'full=principal.role == "SUPERVISOR"', "full=True", False),
+    ("reads are not read-only transactions", API + "store.py", "conn.read_only = True", "pass", False),
+    ("NaN reaches the JSON encoder", API + "store.py", "return float(value) if value is not None and math.isfinite(value) else None",
+     "return float(value) if value is not None else None", False),
+    ("a thinned series can have more points than asked", API + "store.py", "width = -(-(to_ms - from_ms + 1) // max_points)",
+     "width = (to_ms - from_ms) // max_points", False),
+    ("the start of a window is rounded down", API + "routes_read.py", "return whole + (1 if round_up and rest else 0)",
+     "return whole", False),
+    ("a series mixes in other spacecraft", API + "store.py", '"SELECT sc_time_ms, value FROM ops.telemetry_samples WHERE spacecraft_id = %(sc)s "',
+     '"SELECT sc_time_ms, value FROM ops.telemetry_samples WHERE true "', False),
+    ("packet loss counts other events", API + "store.py", "WHERE spacecraft_id = %s AND event_type = 'PACKET_LOSS' ",
+     "WHERE spacecraft_id = %s AND event_type <> 'PACKET_LOSS' ", False),
+    ("readiness ignores the schema revision", API + "health.py", 'elif row["version_num"] != EXPECTED_SCHEMA_REVISION:',
+     "elif False:", False),
+    ("the code expects an older schema revision", API + "health.py", 'EXPECTED_SCHEMA_REVISION = "0003"',
+     'EXPECTED_SCHEMA_REVISION = "0002"', False),
+    ("stale telemetry still counts as ready", API + "health.py", "elif age > limit:", "elif age > limit * 100:", False),
+    ("any web page may call the API", API + "app.py", "allow_origins=list(settings.cors_origins)", 'allow_origins=["*"]', False),
+    ("database errors are shown to the caller", API + "app.py",
+     'return _error(request, 503, "the database is unavailable; nothing was changed")', "return _error(request, 503, str(exc))",
+     False),
+    ("internal errors are shown to the caller", API + "app.py",
+     'return _error(request, 500, "internal error; the details are in the server log under this correlation id")',
+     "return _error(request, 500, str(exc))", False),
+    ("the eclipse phase is not taken from telemetry", API + "routes_read.py", "eclipse_transition=eclipse[1] if eclipse else None,",
+     "eclipse_transition=None,", False),
+    ("the estimate ignores the command", FUNCTIONS, "    if command_name is not None:\n        accepted, reason = twin.handle_command",
+     "    if False:\n        accepted, reason = twin.handle_command", False),
+    ("the estimate takes the wrong end of the eclipse", FUNCTIONS, "if now != previous and now == entering:",
+     "if now != previous and now != entering:", False),
+    ("the estimate does not stop at the FDIR limit", FUNCTIONS, "if twin.mode == MODE_SAFE or twin.soc < SOC_FDIR:",
+     "if twin.mode == MODE_SAFE:", False),
+    ("the runner role may read the schema revision", MIGRATION_3, "TO app_reader", "TO app_reader, app_runner", False),
+]
+
+
 def run_one(description, file, old, new, regenerate, env):
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / "project"
         skip = shutil.ignore_patterns(".git", "__pycache__", "*.egg-info", ".pytest_cache", "build", "target", "demo_out",
-                                      ".venv", "venv")
+                                      ".venv", "venv", "node_modules", "dist")
         shutil.copytree(ROOT, work, ignore=skip)
         target = work / file
         text = target.read_text(encoding="utf-8")
@@ -165,9 +223,10 @@ def main() -> int:
     missed = 0
     mutations = list(MUTATIONS)
     if env.get(ADMIN_URL_ENV):
-        mutations += DB_MUTATIONS
+        mutations += DB_MUTATIONS + API_MUTATIONS
     else:
-        print(f"({len(DB_MUTATIONS)} database mutations skipped: set {ADMIN_URL_ENV} to a PostgreSQL superuser URL)\n")
+        print(f"({len(DB_MUTATIONS) + len(API_MUTATIONS)} database and API mutations skipped: set {ADMIN_URL_ENV} to a "
+              f"PostgreSQL superuser URL)\n")
     for description, file, old, new, regenerate in mutations:
         caught, detail = run_one(description, file, old, new, regenerate, env)
         if caught is None:

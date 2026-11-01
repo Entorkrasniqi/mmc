@@ -1,5 +1,80 @@
 # mini-mission-control
 
+**A pretend satellite, and the mission-control software to fly it.** The satellite sends health data in the real space-industry packet format; a ground
+station stores it, raises alarms and reacts to it; and a web dashboard lets operators watch, acknowledge, and command, with the safety rules real operations
+use: a risky command needs a second person, nothing is sent without a person releasing it, and everything is audited.
+
+![A walk through the dashboard: a satellite in SAFE mode, its alarms and anomaly, a command proposed, approved by a second person, released and verified by the satellite's own telemetry, and the ground track](docs/dashboard-story.gif)
+
+*Nine steps, taken from a real run of the whole stack: a satellite that starts with a 14.9 % battery protects itself by going to SAFE mode; the ground station raises the alarms
+and opens an anomaly on its own; an operator proposes `SetMode NOMINAL`; a different operator approves it; it is released during a contact window, and the satellite's
+telemetry confirms it took effect.*
+
+## See it
+
+<p align="center"><a href="docs/dashboard-overview.png"><img src="docs/dashboard-overview.png" alt="Overview: live telemetry, charts with the alarm limits as coloured bands and the eclipse shaded, and an estimate of when the battery would reach the on-board protection limit" width="860"></a></p>
+
+**Overview.** Every telemetry value as it arrives, coloured when it leaves its limits. The charts draw the warning and critical limits as bands and shade the time the satellite spends in the
+Earth's shadow. *Time to safe mode* asks a copy of the satellite's own power model what would happen to the battery, optionally after a command you are thinking of sending.
+
+<table>
+<tr>
+<td width="50%"><a href="docs/dashboard-alarms.png"><img src="docs/dashboard-alarms.png" alt="Alarms raised by the ground station, with acknowledge and respond buttons"></a><br><b>Alarms</b>: raised and cleared by the ground station from the limits in the specification; a person acknowledges them, or proposes a command in response.</td>
+<td width="50%"><a href="docs/dashboard-anomaly.png"><img src="docs/dashboard-anomaly.png" alt="An unplanned SAFE mode opened an anomaly that links its alarms and the on-board protection event"></a><br><b>Anomalies</b>: an unplanned SAFE mode opens one automatically, linked to the alarms and the event that explain it. They are resolved with a root cause, never deleted.</td>
+</tr>
+<tr>
+<td width="50%"><a href="docs/dashboard-propose.png"><img src="docs/dashboard-propose.png" alt="Proposing SetMode NOMINAL, with the satellite's predicted verdict and the battery outlook"></a><br><b>Propose</b>: before anything is proposed, a copy of the satellite says whether it would accept the command, and what it does to the battery.</td>
+<td width="50%"><a href="docs/dashboard-two-person.png"><img src="docs/dashboard-two-person.png" alt="A vital command whose Approve button is disabled for the person who proposed it"></a><br><b>Two-person rule</b>: whoever proposes a vital command cannot approve it, and the button says why. The database enforces the same rule underneath.</td>
+</tr>
+<tr>
+<td width="50%"><a href="docs/dashboard-commands.png"><img src="docs/dashboard-commands.png" alt="A verified command with its full lifecycle, the exact bytes, the approver and the contact window"></a><br><b>Evidence</b>: the exact bytes, the preflight verdict, the state it was proposed in, who approved, which contact it went out in, and whether the telemetry confirmed it.</td>
+<td width="50%"><a href="docs/dashboard-track.png"><img src="docs/dashboard-track.png" alt="The ground track of the satellite on a world map, sunlit parts orange and eclipse parts violet, with the ground station"></a><br><b>Ground track</b>: where the satellite has been, in sunlight (orange) and in eclipse (violet), and the ground station it talks to.</td>
+</tr>
+</table>
+
+## What is in it
+
+- **A satellite simulator** that speaks real CCSDS space packets over UDP, with a small physics model (orbit, eclipse, solar power, battery, thermal, on-board protection).
+- **One specification file** ([`spec/minisat.yaml`](spec/minisat.yaml)) that describes every packet once; the packet codec, the simulator and the [Yamcs](https://yamcs.org) database (XTCE) are generated from or checked against it.
+- **An operations layer** in PostgreSQL: command executions, alarms, anomalies, contact windows and an append-only audit log. The roles and the safety rules are enforced by the database itself, not only by code. The design is in [`ontology.md`](ontology.md).
+- **An action runner**: the only way anything changes. It checks who is asking, validates, applies the change with its audit row in one transaction, and records refusals too.
+- **A ground station** that stores telemetry, detects lost packets, raises, escalates and clears alarms, opens anomalies, and verifies each command from the satellite's own counters and telemetry. A command is delivered at most once, one at a time.
+- **An HTTP API** (FastAPI): objects, links, time series and one endpoint per action, with health checks, metrics and structured logs.
+- **The dashboard** you see above (React, TypeScript and [Blueprint](https://blueprintjs.com)).
+
+How it was checked: **681 Python tests** on a real PostgreSQL (no mocks), **128 dashboard tests**, and **10 browser tests that drive the whole real stack**. Tests compare against independent oracles (hand-computed bytes, an independent XTCE reader, the real satellite model run forward), and a
+mutation check injects known bugs to confirm the tests notice. Details, and what is *not* verified, are in [section 9](#9-status-and-honest-limits). What was built when is in [`PLAN.md`](PLAN.md); the engineering rules are in [`protocols/`](protocols/README.md).
+
+## Try it
+
+You need Docker, Node.js 22.12 or newer and Python 3.10 or newer. Clone the repository, and from its folder one command starts everything on your own machine (it uses its own throw-away database and never touches anything else):
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate && pip install -e ".[dev,db,api]"
+npm install
+python tools/e2e_stack.py        # PostgreSQL (Docker), simulator, ground station, API and dashboard; Ctrl-C stops and removes it all
+```
+
+Open <http://127.0.0.1:5173>, and sign in by pasting a token from `.e2e/tokens.json` (made fresh on every start). Open a second browser tab for a second person: each tab is its own session.
+
+1. As **alice** (an operator): look at the Overview, then **Commands → Propose command**, choose `SetMode` `NOMINAL`. The satellite is in SAFE mode, so this brings it back.
+2. As **sam** (a supervisor): **Commands → Plan contact** (releasing a command needs a contact window). To see the two-person rule, propose a `Reboot` as sam and try to approve it as sam: the button is disabled and says why.
+3. As **bob** (another operator): approve alice's proposal, release it, and watch it go from SENT to ACCEPTED to VERIFIED.
+
+The satellite starts with a 14.9 % battery so that there is something to see at once. For a calmer start run `python tools/e2e_stack.py --soc 30`; to run the pieces yourself, see sections 3.6 and 3.7.
+
+## Honest scope
+
+- The satellite is fictional and all the numbers are illustrative. This is a learning and portfolio project, not flight software.
+- The Yamcs configuration is generated and checked against the XTCE schema and the Yamcs source code, but **Yamcs has never been started with it**.
+- The login is a **development-only static token** per person (no expiry). It is for one machine, and the API refuses to listen elsewhere. A real deployment needs real authentication.
+- There is **no AI assistant yet**; it is planned as a helper that may propose commands but never send them ([`PLAN.md`](PLAN.md), phase 6).
+- The GitHub Actions workflow is written but has not run on GitHub yet.
+
+---
+
+## Where it started: the simulator
+
 A pretend satellite and the ground software that talks to it. The **simulator** (Python) plays a small satellite that sends
 **telemetry** (its health data) and obeys **telecommands** (instructions from the ground), using the real space-industry packet
 format (CCSDS space packets) over the network. A **specification file** describes every packet once, and a generator turns it into
@@ -25,13 +100,6 @@ the payload on; the battery drains through the 35 % warning and 20 % critical li
 SAFE mode (5.4 h). At 6.5 h the operator tries PAYLOAD again and the satellite **refuses** because the battery is too low. At 8 h the
 operator returns to NOMINAL and the battery recovers. Grey bands are eclipses (the satellite is in the Earth's shadow, solar panels
 produce nothing).*
-
-> **Where the project is going.** The simulator, packet codec and XTCE generator described below are the foundation. On top of them
-> the project is being extended into an ontology-based mission-control application: a PostgreSQL store with an audit trail, an action
-> runner, a web dashboard and an AI assistant that may propose commands but never send them. The design is in
-> [`ontology.md`](ontology.md), the plan and what is done in [`PLAN.md`](PLAN.md), and the engineering rules in
-> [`protocols/`](protocols/README.md). So far the database, the action runner and the ground station that feeds it exist
-> (sections 3.5 and 3.6); there is no web dashboard or AI assistant yet. Everything else in this README describes the simulator side.
 
 ---
 
@@ -451,6 +519,44 @@ Things worth trying: approve a command as `vera` (a viewer) or `helper` (the AI 
 then as `tina`; propose `SetMode` `PAYLOAD` while the battery is below 30 % and see the warning and why an operator cannot approve it; start `minisat simulate --soc 14` (below the 15 % at which the satellite protects itself) and watch it go to SAFE mode within a second, which the ground station
 records as an FDIR event and an anomaly. Every attempt, successful or refused, is a row in `ops.audit_log`.
 
+### 3.7 The API and the dashboard
+
+The ground station and the actions are also reachable over HTTP, and there is a web dashboard on top ([`PLAN.md`](PLAN.md) phases 4 and 5). The API reads as the
+read-only database role and changes things only through the same action runner as `minisat act`; the dashboard is a client of it.
+
+```bash
+pip install -e ".[dev,db,api]"
+minisat dev-tokens                    # prints a MINISAT_API_DEV_TOKENS=... line: put it in .env. DEV ONLY: static tokens, no expiry
+minisat api --no-contact-check        # http://127.0.0.1:8000 ; interactive docs at /docs ; --no-contact-check because the simulator is always in contact
+npm install && npm run dev            # the dashboard, http://127.0.0.1:5173 (Vite proxies /api to the API); sign in by pasting a token
+```
+
+What the API offers (all of it needs a token except `/health/*`; any role may read, the action runner decides who may change what):
+
+| Route | What it gives |
+| --- | --- |
+| `GET /api/spacecraft`, `/api/spacecraft/{id}` | the spacecraft with its newest values read against their limits, health, and how old the data is |
+| `GET /api/spacecraft/{id}/alarms`, `/commands`, `/events`, `/anomalies`, `/contacts` | the links of a spacecraft, newest first (oldest first for contacts), with filters and paging |
+| `GET /api/spacecraft/{id}/series/{parameter}` | a telemetry parameter over time, thinned to at most `max_points` (mean, min and max per bucket), with the parameter's limits for drawing bands |
+| `GET /api/alarms/{id}`, `/command-executions/{id}`, `/anomalies/{id}`, `/contacts/{id}` | one object with what is linked to it (responding commands, evidence for an approver, linked alarms and events, packets lost during the pass) |
+| `GET /api/definitions/...`, `/api/ground-stations`, `/api/operators`, `/api/me` | the definitions from the specification (read-only), stations, operators (supervisors see roles), the caller |
+| `POST /api/functions/preflight-command`, `/estimate-time-to-safe` | what the satellite would say to a command, and when the battery would reach the FDIR limit, optionally after a command (nothing is changed or audited) |
+| `GET /api/actions`, `POST /api/actions/<name>` | one route per action, generated from the action registry (the actions a person or the agent may run; the system's own are not exposed) |
+| `GET /health/live`, `/health/ready`, `/metrics` | liveness; readiness (database, migrations, fresh telemetry); Prometheus metrics (needs a token) |
+
+Every response carries an `X-Correlation-ID` (send your own UUID to keep it); the same id is in the JSON log lines and on the audit rows. The six questions of
+[`ontology.md`](ontology.md) section 9 are answered through these routes; `tests/api/test_api_questions.py` asks each of them the way a client would.
+
+The browser tests run the whole real stack (PostgreSQL through Docker Compose, simulator, ground station, API, dashboard) and drive it with a real browser, no mocks:
+
+```bash
+npx playwright install chromium       # once
+npm run e2e                           # about 1 minute; needs Docker; starts and removes everything itself (tools/e2e_stack.py)
+python tools/e2e_stack.py             # or: just the stack, to click around in (tokens in .e2e/tokens.json; Ctrl-C removes it all)
+```
+
+(Screenshots of every page are at the top of this README.)
+
 ---
 
 ## 4. How it works, step by step
@@ -731,8 +837,12 @@ mini-mission-control/
 │   └── ontology/                     definitions.py (read-only, from the spec), functions.py (preflight, effects, events, health),
 │       │                             runner.py + actions/ (the action runner and every action), ingest.py, automation.py, worker.py,
 │       │                             ground.py (the ground station), seed.py, cli.py, dbconfig.py (database roles and URLs)
+│       └── api/                  the HTTP API (FastAPI): app.py, auth.py (DEV-ONLY tokens), store.py (every read), routes_read.py,
+│                                 routes_actions.py (generated from the registry), health.py, metrics.py, logs.py, settings.py, cli.py
+├── dashboard/                    the web dashboard (Vite, React, TypeScript, Blueprint): src/ (pages, components, util), e2e/ (Playwright)
+├── package.json                  the dashboard's dependencies and scripts (npm run dev | build | typecheck | test | e2e)
 ├── db/                               roles.sql, database.sql and init/ : the database roles and lock-down (used by Docker and the tests)
-├── migrations/                       Alembic migrations: 0001 operations schema, 0002 command context and more events
+├── migrations/                       Alembic migrations: 0001 operations schema, 0002 command context and more events, 0003 reader sees the schema revision
 ├── docker-compose.yml, .env.example  the PostgreSQL service and its settings (copy to .env)
 ├── ontology.md, PLAN.md              the domain model and the plan (what is done, what is next)
 ├── protocols/                        engineering protocols and architecture decision records (adr/)
@@ -741,9 +851,12 @@ mini-mission-control/
 │   └── src/main/yamcs/
 │       ├── etc/                      yamcs.yaml, yamcs.minisat.yaml, processor.yaml
 │       └── mdb/minisat.xml           the GENERATED XTCE database (do not edit by hand)
-├── tests/                            252 tests + 259 database tests (table below), xtce_interp.py (the independent XTCE reader)
+├── tests/                            294 tests that need nothing, 387 more with PostgreSQL (table below), xtce_interp.py (the independent XTCE reader)
+│                                     (dashboard: 128 unit and component tests in dashboard/src, 10 browser tests in dashboard/e2e)
 ├── tools/validate_xtce.py            checks an XTCE file against the official XSD
-├── tools/mutation_check.py           injects 14 known bugs (plus 37 database and logic bugs with a server) and checks that the tests notice every one
+├── tools/mutation_check.py           injects 14 known bugs (plus 37 database and logic bugs and 26 API bugs with a server) and checks that the tests notice every one
+├── tools/e2e_stack.py                starts the whole stack for the browser tests (and for trying the dashboard by hand)
+├── tools/dump_action_schemas.py      writes the action schemas the dashboard's tests read (and checks they are current)
 ├── docs/                             scenario.png and docs/example/ (scenario.csv, demo_console.txt)
 ├── .github/workflows/ci.yml          GitHub Actions: Python 3.10-3.13, database up to date, tests, schema check, demo
 ├── LICENSE                           AGPL-3.0
@@ -765,7 +878,11 @@ mini-mission-control/
 | `test_ontology_definitions.py` | 16 | definitions agree with the YAML read independently, hand-counted packet sizes, alarm severity boundaries, read-only |
 | `test_ontology_dbconfig.py` | 9 | database URLs per role, missing or odd settings |
 | `test_ontology_functions.py` | 30 | preflight at the 30 % boundary, expected effects, what the counters say, derived events, health precedence, packet-loss counting |
-| `tests/db/` (9 files) | 259 | **real PostgreSQL** (need `MINISAT_TEST_ADMIN_URL`): migrations up and down, an exact privilege matrix per role, constraints, the append-only audit log; the runner (exact role matrix over every action, audit, atomicity, idempotency); the command lifecycle incl. every illegal transition; alarms and anomalies; ingestion and automations; the CLI; and the whole chain over **real UDP sockets** |
+| `test_ontology_time_to_safe.py` | 21 | time to SAFE mode: three values worked out on paper (1600 s, 1963.6 s, 900 s), and 120 starting states compared with the real satellite model run second by second (the measured error is stated in the file) |
+| `test_api_settings.py` | 23 | API settings and dev-token parsing, the token generator, the refusal to listen beyond this machine, JSON log set-up |
+| `test_dashboard_fixtures.py` | 1 | the action schemas the dashboard's tests read are current |
+| `tests/db/` (9 files) | 261 | **real PostgreSQL** (need `MINISAT_TEST_ADMIN_URL`): migrations up and down, an exact privilege matrix per role, constraints, the append-only audit log; the runner (exact role matrix over every action, audit, atomicity, idempotency); the command lifecycle incl. every illegal transition; alarms and anomalies; ingestion and automations; the CLI; and the whole chain over **real UDP sockets** |
+| `tests/api/` (5 files) | 124 | **real PostgreSQL and real ground-station parts behind the HTTP API**: every route needs a token (walked from the OpenAPI document), the exact role matrix over HTTP with one audit row per attempt, the six questions of `ontology.md` section 9 answered by navigation, series arithmetic (buckets, NaN, millisecond bounds), health, metrics, correlation ids, structured logs, CORS, and failure with the database down |
 
 Run subsets with `pytest tests/test_udp.py -q`, or one test with `pytest -k eclipse`. To include the schema check: `XTCE_ONLINE=1 pytest -q`.
 
@@ -781,7 +898,10 @@ Run subsets with `pytest tests/test_udp.py -q`, or one test with `pytest -k ecli
 * A real end-to-end session over UDP (simulator, listener, three commands) works as shown in section 3.3.
 * The database layer (section 3.5): its tests passed on PostgreSQL 14.18 (a local server) and on PostgreSQL 16.15 started by `docker compose up -d db`
   (where the init script, role logins and `alembic upgrade head` were also tried by hand), on Python 3.12.
-* The action runner and the ground station (section 3.6): all 511 tests pass (510, the XTCE schema check skips) on PostgreSQL 16 from Docker, on Python 3.12; without a database
+* The HTTP API and the dashboard (section 3.7): **681 tests pass** on PostgreSQL 16 from Docker, Python 3.12 (one skips: the XTCE schema check, which needs the network); **294 pass** in a fresh environment with only the base dependencies (the API and database tests skip themselves there).
+  The dashboard has 128 unit and component tests (Vitest), a clean TypeScript check and a production build, and **10 browser tests (Playwright, Chromium) pass against the real stack** (PostgreSQL via `docker compose`, the simulator, the ground station, the API and the dashboard): a satellite that starts in SAFE mode, its anomaly and alarms, the two-person rule across two signed-in people, a contact window planned in the dashboard, and the spacecraft recovered with an approved command that the satellite's own telemetry verifies.
+  The mutation check injects 26 more bugs into the API and the time-to-safe estimate, and every one is caught (its first run found two holes in the tests, now closed).
+* The action runner and the ground station (section 3.6): all 511 tests passed (510, the XTCE schema check skips) on PostgreSQL 16 from Docker, on Python 3.12; without a database
   251 pass in a Python 3.11 environment that has only the base dependencies. The whole chain was also run by hand with the real `minisat simulate`, `ground` and `act` commands:
   a low battery became an alarm, and a heater command went SENT, ACCEPTED, VERIFIED from the satellite's own telemetry.
 
@@ -789,7 +909,7 @@ Run subsets with `pytest tests/test_udp.py -q`, or one test with `pytest -k ecli
 
 * **Yamcs has never been started with this configuration.** The environment this was written in could not download from Maven Central. Everything about Yamcs (class names, option names, how the restriction criteria and the command assignments are interpreted)
   was checked against the Yamcs 5.13.7 source code and schema, not by running it. `mvn yamcs:run` may need small fixes. The `pom.xml` is modelled on the official quickstart and is well-formed, but dependency resolution is untested.
-* **GitHub Actions** (`.github/workflows/ci.yml`, including the new `database` job) has not run yet, and Python 3.10 has not been run anywhere.
+* **GitHub Actions** (`.github/workflows/ci.yml`, including the `database` and `dashboard` jobs) has not run yet, and Python 3.10 has not been run anywhere.
 * **The Python-side package has only been run on Linux.**
 
 **Limits of the model (say these out loud if you present the project):**
@@ -797,16 +917,20 @@ Run subsets with `pytest tests/test_udp.py -q`, or one test with `pytest -k ecli
 * The satellite is fictional and **all numbers are illustrative**: the power budget, thermal behaviour and thresholds demonstrate the mechanics, not any real design.
 * Real missions put **PUS** (ECSS packet utilisation standard) services on top of CCSDS packets, use many more packet types, and protect the link with frames, CRCs and encryption/authentication. None of that is here.
   Commands here are **not authenticated**: anyone who can send a UDP datagram to the port can command the satellite. That is acceptable for a toy on `127.0.0.1` and unacceptable for anything else.
-* Telemetry is not time-ordered or reassembled; UDP can lose or reorder packets (the sequence counter would reveal it, but nothing reads it yet).
+* Telemetry is not time-ordered or reassembled; UDP can lose or reorder packets (the ground station counts the gaps in the sequence counter as PACKET_LOSS events, which the API sums per contact window).
 * The Yamcs setup has no users, no roles and no TLS.
 * Position is a spherical-Earth, circular-orbit approximation, good for plotting, not for navigation.
 * The XTCE generator covers the subset needed here (fixed-size integers and floats, enumerations, static alarms, simple commands). It is not a general XTCE writer.
-* **There is no login yet.** `minisat act alice ...` believes the operator name it is given, and anyone who has the database passwords can act as anyone. The roles, the two-person rule
-  and the audit log are real, but they bind the *actions*, not the person at the keyboard; authentication comes with the API (PLAN.md phase 4).
+* **There is no real login.** `minisat act alice ...` believes the operator name it is given, and the API accepts one **static DEV-ONLY token per operator** (`minisat dev-tokens`): tokens do not expire, cannot be revoked without a restart, and the API refuses to listen beyond this machine.
+  The roles, the two-person rule and the audit log are real, but a shared deployment needs OIDC or similar first (PLAN.md open decisions).
 * Command verification relies on counters and the id of the latest command, so only **one command can be in flight per spacecraft**; commands are delivered **at most once** and never retried.
 * Alarms have no hysteresis: a value hovering around a limit raises and clears alarms repeatedly. Verification windows (5 s and 10 s) are wall-clock values, not tuned to anything.
 * One ground station watches one spacecraft; notifications to supervisors are queued in the outbox but nothing delivers them beyond a log line.
-* Not built yet: the web dashboard, the HTTP API, the AI assistant, `estimateTimeToSafe` and the staged proposal that would use it.
+* `estimateTimeToSafe` is approximate: it replays the satellite's power model from the newest telemetry. It cannot see the phase of the model's 8-minute solar wobble, so over a few hours it is within about 3 % of the real satellite (the tests measure it, and show that even the real model varies by that much between laps). The staged proposal that would use it is not built.
+* The API opens a database connection per request (no pool), applies no rate limit, and has no notifications; `/metrics` cannot count decode errors or packets per APID, because the ground station is another process.
+* The dashboard's JavaScript is one 1 MB bundle (304 kB gzipped), and the browser tests are run by hand (`npm run e2e`): the GitHub Actions `dashboard` job runs only the type check, the unit tests and the build, and has not run on GitHub yet.
+* `node_modules/` is committed in this repository's history (about 63 000 files); see the note in PLAN.md.
+* Not built yet: the AI assistant.
 
 ---
 

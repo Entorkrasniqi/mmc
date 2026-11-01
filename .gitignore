@@ -18,3 +18,10 @@ yamcs/target/
 .idea/
 .vscode/
 .DS_Store
+# node (the dashboard's dependencies are installed with 'npm install'; the lockfile is committed)
+node_modules/
+dashboard/dist/
+dashboard/test-results/
+dashboard/playwright-report/
+# dev tokens for the API (tools/e2e_stack.py writes them here)
+.e2e/

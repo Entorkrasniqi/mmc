@@ -202,6 +202,18 @@ def _need_db_extra(name):
     return run
 
 
+def _need_api_extra(name):
+    def run(args):
+        try:
+            from .api import cli as api_cli
+            return getattr(api_cli, name)(args)
+        except ModuleNotFoundError as exc:
+            print(f"this command needs the API dependencies ({exc.name} is missing): pip install -e \".[db,api]\"",
+                  file=sys.stderr)
+            return 2
+    return run
+
+
 # ------------------------------------------------------------------------------------------------ entry point
 
 def _percent(text: str) -> float:
@@ -296,6 +308,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("status", help="the spacecraft's health, open alarms and anomalies, recent commands and events")
     p.add_argument("--spacecraft", default="MINISAT-1")
     p.set_defaults(func=_need_db_extra("cmd_status"))
+
+    p = sub.add_parser("api", help="the HTTP API of the ontology (needs the api extra): objects, links, series, actions")
+    p.add_argument("--host", default="127.0.0.1", help="where to listen (anything but this machine needs --allow-remote)")
+    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--allow-remote", action="store_true",
+                   help="listen on a non-loopback address although the only login is a DEV-ONLY static token")
+    p.add_argument("--no-contact-check", action="store_true",
+                   help="release commands without a planned contact window (for the simulator, which is always in contact)")
+    p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    p.set_defaults(func=_need_api_extra("cmd_api"))
+
+    p = sub.add_parser("dev-tokens", help="make DEV-ONLY API tokens: prints the MINISAT_API_DEV_TOKENS line for .env")
+    p.add_argument("operators", nargs="*", help="operator ids (default: the demo operators of 'db-seed --demo')")
+    p.set_defaults(func=_need_api_extra("cmd_dev_tokens"))
     return parser
 
 

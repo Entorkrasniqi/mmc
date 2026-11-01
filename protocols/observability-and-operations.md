@@ -77,5 +77,8 @@ These are aims for a local demo. Measure, then correct them.
 
 | Rule | Mechanism | State |
 | --- | --- | --- |
-| Correlation IDs, metrics, health endpoints | code + tests | Not yet |
+| Correlation IDs on requests, responses, log lines and audit rows | `src/minisat/api/` (`app.py`, `logs.py`); `tests/api/test_api_ops.py` | Enforced for the API. The ground station's own log lines are plain text and carry no id |
+| Structured JSON logs, no secrets in them | `JsonFormatter`; a test that a token never reaches a log line | Enforced for the API |
+| `/health/live`, `/health/ready` (database as reader and runner, migration revision, telemetry no older than 3 periods) | `health.py`; `tests/api/test_api_ops.py` (including: nothing leaks when the database is down) | Enforced |
+| Metrics: actions by name and outcome, requests by route template, alarms by severity, commands by state, time to VERIFIED, outbox backlog and age, telemetry age and ingest lag, packets lost, database up | `metrics.py` (read from the database at scrape time); `tests/api/test_api_ops.py` | Enforced. **Missing:** packets per APID and decode errors (the ground station is another process), agent metrics (no agent yet), database connection and slow-query metrics |
 | Restore test | documented procedure + a one-off run | Not yet |

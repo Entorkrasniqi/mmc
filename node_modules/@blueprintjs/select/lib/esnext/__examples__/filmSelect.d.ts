@@ -1,0 +1,7 @@
+import { type SelectProps } from "../components/select/select";
+import { type Film } from "./films";
+type FilmSelectProps = Omit<SelectProps<Film>, "createNewItemFromQuery" | "createNewItemRenderer" | "itemPredicate" | "itemRenderer" | "items" | "itemsEqual" | "noResults" | "onItemSelect"> & {
+    allowCreate?: boolean;
+};
+export declare function FilmSelect({ allowCreate, fill, ...restProps }: FilmSelectProps): import("react/jsx-runtime").JSX.Element;
+export {};

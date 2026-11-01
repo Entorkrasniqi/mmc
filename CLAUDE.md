@@ -18,7 +18,12 @@ docker run --rm -d --name minisat-test-pg -e POSTGRES_PASSWORD=test -p 127.0.0.1
 MINISAT_REQUIRE_DB=1 MINISAT_TEST_ADMIN_URL=postgresql://postgres:test@127.0.0.1:55432/postgres pytest -q tests/db
 # dev database: cp .env.example .env; docker compose up -d db; set -a; . ./.env; set +a; alembic upgrade head
 minisat db-seed --demo; minisat ground; minisat act alice "Propose Command" '{...}'; minisat status   # see README 3.6
-python tools/mutation_check.py              # with MINISAT_TEST_ADMIN_URL set it also mutates the SQL and the runner logic
+python tools/mutation_check.py              # with MINISAT_TEST_ADMIN_URL set it also mutates the SQL, the runner logic and the HTTP API
+# API (pip install -e ".[dev,db,api]"): minisat dev-tokens > put the line in .env; minisat api --no-contact-check
+# dashboard (root package.json; node_modules is installed there): npm run typecheck | test | build | dev ; npm run e2e needs Docker and
+# runs the REAL stack (tools/e2e_stack.py: its own database container on port 55433, never your dev database). Stop a hand-started
+# stack with Ctrl-C or SIGTERM, never SIGKILL (it would leave the services running)
+python tools/dump_action_schemas.py         # after changing an action's parameters (the dashboard's tests read it)
 ```
 
 ## Rules that matter most
@@ -35,4 +40,9 @@ python tools/mutation_check.py              # with MINISAT_TEST_ADMIN_URL set it
   rules in `actions/commands.py` without reading `protocols/command-safety-protocol.md`.
 - Never weaken or skip a test to make it pass. Expected values in tests are worked out independently, not copied from the code.
 - Say "verified" only for what you ran. Yamcs has never been started with this configuration; the README says so.
-- No secrets in the repository (`.env` is ignored). Do not commit or push unless asked.
+- The API (`src/minisat/api/`) never writes except through `ActionRunner`; reads go through `store.py` as `app_reader`, with query parameters only. A new
+  action is exposed over HTTP automatically unless it is system-only: add it to `EXPOSED_ROLES` in `tests/api/test_api_auth.py` as well as to `ROLE_MATRIX`.
+  Authentication is a DEV-ONLY static token per operator: do not present it as real login, and do not make it listen beyond localhost.
+- Dashboard: the server decides, the browser only shows (`util/commands.ts` disables buttons the runner would refuse, and says why). Never
+  `dangerouslySetInnerHTML`; keep the token in `sessionStorage` only. A UI bug found in the browser gets a unit test where the logic can be tested.
+- No secrets in the repository (`.env` and `.e2e/` are ignored). Do not commit or push unless asked.
