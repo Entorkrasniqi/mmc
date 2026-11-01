@@ -8,6 +8,9 @@ sys.path.insert(0, str(ROOT / "tests"))      # for the xtce_interp helper
 sys.path.insert(0, str(ROOT / "tools"))      # for validate_xtce
 
 from minisat.spec import load_spec  # noqa: E402
+# fixtures of the PostgreSQL tests in tests/db; they skip themselves when no database server is configured
+from dbfixtures import (admin_conninfo, clock, database_factory, db, fresh_db, roles_ready, run,  # noqa: E402,F401
+                        template_db, world)
 
 SPEC_PATH = ROOT / "spec" / "minisat.yaml"
 XTCE_PATH = ROOT / "yamcs" / "src" / "main" / "yamcs" / "mdb" / "minisat.xml"

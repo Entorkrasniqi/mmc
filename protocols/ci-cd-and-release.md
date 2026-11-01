@@ -13,10 +13,10 @@ The default branch is always releasable. A change merges only when automated che
 | 1. Static | lint (`flake8`, 125 cols), type check (add `mypy` or `pyright` for the ontology package), `ruff`/`eslint` and `tsc` for the dashboard | lint exists |
 | 2. Generated files fresh | `minisat gen-xtce --check`; any other generated file | exists |
 | 3. Unit and component tests | `pytest` on Python 3.10-3.13; dashboard unit tests | Python exists |
-| 4. Database tests | PostgreSQL service container; migrations applied from empty and from the previous release | not yet |
+| 4. Database tests | PostgreSQL service container; migrations applied from empty (done: also downgrade to base and up again) and, once there is a second release, from the previous release | job written (`database`), not yet run on GitHub |
 | 5. Schema validation | XTCE 1.2 XSD check | exists (needs network or a local XSD) |
 | 6. Security | `pip-audit`, `npm audit`, secret scan, licence check | not yet |
-| 7. Build | Docker images for backend and dashboard; `docker compose config` validates | not yet |
+| 7. Build | Docker images for backend and dashboard; `docker compose config` validates | compose file validated in the `database` job (not yet run on GitHub); images not built yet |
 | 8. Integration | `docker compose up` in CI, run a short scripted scenario, check for the expected alarm and command lifecycle | not yet |
 | 9. Agent evals | hard-gate subset of [agent-evaluation.md](agent-evaluation.md) | not yet |
 | 10. Nightly | mutation check, full agent eval, long soak run | not yet |
